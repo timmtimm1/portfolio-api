@@ -1,0 +1,29 @@
+# Postgres local para desenvolvimento e testes.
+# A aplicacao roda fora do compose por enquanto (uvicorn --reload no host);
+# o Dockerfile da API entra na Etapa 12, junto com o deploy.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-portfolio}
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      # Sem default: se .env nao existir, o compose falha em vez de subir um
+      # banco com senha previsivel.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    ports:
+      # Bind em 127.0.0.1, nao em 0.0.0.0: sem isso o Postgres fica exposto na
+      # rede local (e o Docker abre porta no firewall por baixo do UFW).
+      # Porta do host configuravel: a 5432 ja e usada pelo Postgres do
+      # mercado_financeiro. Bancos de projetos distintos ficam isolados.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portfolio} -d ${POSTGRES_DB:-portfolio}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
