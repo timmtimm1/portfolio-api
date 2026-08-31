@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     )
 
     ENVIRONMENT: Environment = "local"
+    # Loga todo o SQL executado. Util para caçar N+1 no desenvolvimento;
+    # ignorado em producao mesmo se ligado por engano (ver app/core/db.py).
+    SQL_ECHO: bool = False
     PROJECT_NAME: str = "Portfolio Tracker API"
     API_V1_PREFIX: str = "/api/v1"
 

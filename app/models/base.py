@@ -1,0 +1,61 @@
+"""Base declarativa comum a todos os models."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Convencao de nomes para constraints e indices.
+#
+# Por que isso importa: sem ela o Postgres batiza as constraints sozinho e o
+# Alembic gera migrations com nomes que ele mesmo nao consegue referenciar depois
+# ("could not find constraint"). Definir a convencao no dia 1 e barato; descobrir
+# a falta dela na 15a migration, em producao, e caro.
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class UUIDPrimaryKeyMixin:
+    """Chave primaria UUID em vez de inteiro sequencial.
+
+    Motivo de seguranca: com `id` sequencial, `/users/1` revela que existe um
+    usuario 1 e convida a percorrer 2, 3, 4... Uma falha de autorizacao vira
+    vazamento em massa. Com UUID nao ha o que enumerar -- e defesa em profundidade,
+    nao substituto da checagem de autorizacao (essa vem na Etapa 3).
+
+    Motivo de escalabilidade: o id e gerado na aplicacao, sem ida ao banco e sem
+    contencao de sequence -- importante quando houver varios workers escrevendo.
+    """
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+
+
+class TimestampMixin:
+    """created_at / updated_at preenchidos pelo **banco**, nao pela aplicacao.
+
+    `server_default=func.now()` e `onupdate` no servidor garantem o carimbo mesmo
+    quando a linha e alterada por uma migration ou por SQL manual. Se a aplicacao
+    fosse a unica fonte, qualquer escrita fora dela produziria dado inconsistente.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.core.config import Settings, get_settings
+from app.core.db import dispose_engine
 from app.routers import health
 
 
@@ -16,11 +17,13 @@ from app.routers import health
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ciclo de vida: o que abre no boot e fecha no shutdown.
 
-    Por enquanto so valida a configuracao. A partir da Etapa 1 e aqui que o pool
-    de conexoes do banco e descartado no shutdown.
+    Valida a configuracao no boot (falha cedo, nao no primeiro request) e fecha o
+    pool de conexoes no shutdown -- sem isso o processo pode encerrar deixando
+    conexoes penduradas no Postgres ate o timeout do servidor.
     """
-    get_settings()  # falha ja no boot se faltar segredo, nao no primeiro request
+    get_settings()
     yield
+    await dispose_engine()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
