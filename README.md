@@ -104,9 +104,12 @@ Convenções, cada uma com um erro comum associado:
   renda variável. Usar `rf=0`, como em exemplos americanos, o tornaria positivo.
 - **Correlação entre retornos, não entre preços.** Séries de preços de duas ações quase
   sempre correlacionam alto porque ambas sobem com o mercado — correlação espúria.
-- **Séries alinhadas pela interseção das datas** antes de qualquer cálculo. Correlacionar
-  históricos de tamanhos diferentes produz um número com a forma certa e o significado
-  errado: nada estoura, nada avisa.
+- **Séries alinhadas pela interseção das datas**, e o alinhamento é garantido pelo
+  **tipo**, não por convenção. Correlacionar históricos de tamanhos ou períodos diferentes
+  produz um número com a forma certa e o significado errado — e nada estoura. Por isso os
+  cálculos recebem `SeriesAlinhadas`, cujas invariantes (um preço por data, datas em ordem
+  estrita, sem repetição) são verificadas na construção: se o objeto existe, está alinhado,
+  e nenhuma função adiante precisa reconferir.
 - **Desvio-padrão amostral (`ddof=1`)**, que não subestima o risco.
 
 `Decimal` para dinheiro, `float` para estatística — a fronteira é uma função com nome

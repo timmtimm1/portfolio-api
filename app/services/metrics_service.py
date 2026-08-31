@@ -22,13 +22,13 @@ async def metricas(
 ) -> PortfolioMetrics:
     """Metricas de cada ativo e a matriz de correlacao entre eles."""
     pedidos = sorted({t.strip().upper() for t in tickers if t.strip()})
-    datas, series = await series_service.carregar_series(db, pedidos, desde=desde, ate=ate)
+    series = await series_service.carregar_series(db, pedidos, desde=desde, ate=ate)
 
-    if not series or len(datas) <= MINIMO_OBSERVACOES:
+    if series is None or len(series) <= MINIMO_OBSERVACOES:
         return PortfolioMetrics(
-            inicio=datas[0] if datas else None,
-            fim=datas[-1] if datas else None,
-            pregoes=len(datas),
+            inicio=series.inicio if series else None,
+            fim=series.fim if series else None,
+            pregoes=len(series) if series else 0,
             taxa_livre_risco=taxa_livre_risco,
             ativos=[],
             correlacao=None,
@@ -36,13 +36,13 @@ async def metricas(
         )
 
     calculadas: list[AssetMetrics] = []
-    aptos: dict[str, object] = {}
+    aptos: list[str] = []
 
-    for ticker in sorted(series):
-        m = metricas_do_ativo(ticker, series[ticker], taxa_livre_risco)
+    for ticker in series.tickers:
+        m = metricas_do_ativo(ticker, series.precos[ticker], taxa_livre_risco)
         if m is None:
             continue
-        aptos[ticker] = series[ticker]
+        aptos.append(ticker)
         calculadas.append(
             AssetMetrics(
                 ticker=m.ticker,
@@ -60,13 +60,16 @@ async def metricas(
     # que nao informa nada. Devolver uma matriz 1x1 seria ruido com aparencia
     # de resultado.
     if len(aptos) >= 2:
-        nomes, matriz = matriz_correlacao(aptos)  # type: ignore[arg-type]
+        # `subconjunto` preserva as datas: recortar os ativos aptos montando um
+        # dicionario a mao seria exatamente a brecha por onde o desalinhamento
+        # voltaria depois de todo esse cuidado.
+        nomes, matriz = matriz_correlacao(series.subconjunto(aptos))
         correlacao = CorrelationMatrix(tickers=nomes, matriz=matriz.tolist())
 
     return PortfolioMetrics(
-        inicio=datas[0],
-        fim=datas[-1],
-        pregoes=len(datas),
+        inicio=series.inicio,
+        fim=series.fim,
+        pregoes=len(series),
         taxa_livre_risco=taxa_livre_risco,
         ativos=calculadas,
         correlacao=correlacao,

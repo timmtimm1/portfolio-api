@@ -6,12 +6,11 @@ from collections import defaultdict
 from datetime import date as date_type
 from decimal import Decimal
 
-import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, PriceHistory
-from app.services.metrics import para_float
+from app.services.metrics import SeriesAlinhadas, para_float
 
 
 async def carregar_series(
@@ -20,8 +19,12 @@ async def carregar_series(
     *,
     desde: date_type | None = None,
     ate: date_type | None = None,
-) -> tuple[list[date_type], dict[str, np.ndarray]]:
-    """Devolve (datas comuns, {ticker: precos}) -- todas as series do mesmo tamanho.
+) -> SeriesAlinhadas | None:
+    """Devolve `SeriesAlinhadas`, ou None se nao houver dia em comum.
+
+    O retorno e um TIPO com invariante, nao uma tupla de dicionarios. Assim o
+    alinhamento deixa de ser uma promessa desta funcao e passa a ser uma
+    propriedade verificada do objeto -- ninguem adiante precisa confiar.
 
     ## O alinhamento e o ponto deste modulo
 
@@ -43,7 +46,7 @@ async def carregar_series(
     um ano de historico, sao 7.500 linhas: trivial numa consulta, e N+1 em trinta.
     """
     if not tickers:
-        return [], {}
+        return None
 
     stmt = (
         select(Asset.ticker, PriceHistory.date, PriceHistory.close)
@@ -60,14 +63,16 @@ async def carregar_series(
         por_ticker[ticker][dia] = fechamento
 
     if not por_ticker:
-        return [], {}
+        return None
 
     datas_comuns = set.intersection(*(set(d) for d in por_ticker.values()))
     if not datas_comuns:
-        return [], {}
+        return None
 
     # Ordem cronologica e obrigatoria: retorno diario e P_t / P_{t-1}. Com as
     # datas fora de ordem o calculo roda e devolve ruido.
     datas = sorted(datas_comuns)
-    series = {t: para_float([por_ticker[t][d] for d in datas]) for t in por_ticker}
-    return datas, series
+    return SeriesAlinhadas(
+        datas=tuple(datas),
+        precos={t: para_float([por_ticker[t][d] for d in datas]) for t in por_ticker},
+    )

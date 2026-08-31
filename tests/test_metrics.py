@@ -5,11 +5,14 @@ Puros, com valores conferidos a mao ou construidos para ter resposta exata.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import numpy as np
 import pytest
 
 from app.services.metrics import (
     PREGOES_POR_ANO,
+    SeriesAlinhadas,
     indice_sharpe,
     maior_queda,
     matriz_correlacao,
@@ -19,6 +22,14 @@ from app.services.metrics import (
     retornos_diarios,
     volatilidade_anualizada,
 )
+
+
+def alinhadas(**series: np.ndarray) -> SeriesAlinhadas:
+    """Monta SeriesAlinhadas a partir de arrays de mesmo tamanho, com datas
+    sinteticas consecutivas."""
+    n = len(next(iter(series.values())))
+    datas = tuple(date(2026, 1, 1) + timedelta(days=i) for i in range(n))
+    return SeriesAlinhadas(datas=datas, precos=dict(series))
 
 
 class TestRetornos:
@@ -118,27 +129,27 @@ class TestMaiorQueda:
 class TestCorrelacao:
     def test_series_identicas_tem_correlacao_1(self) -> None:
         base = np.cumprod(np.append(1.0, 1 + np.array([0.01, -0.02, 0.03] * 15))) * 100
-        _, matriz = matriz_correlacao({"A": base, "B": base * 3})
+        _, matriz = matriz_correlacao(alinhadas(A=base, B=base * 3))
         assert matriz[0][1] == pytest.approx(1.0)
 
     def test_series_espelhadas_tem_correlacao_menos_1(self) -> None:
         retornos = np.array([0.01, -0.02, 0.03] * 15)
         a = np.cumprod(np.append(1.0, 1 + retornos)) * 100
         b = np.cumprod(np.append(1.0, 1 - retornos)) * 100
-        _, matriz = matriz_correlacao({"A": a, "B": b})
+        _, matriz = matriz_correlacao(alinhadas(A=a, B=b))
         assert matriz[0][1] == pytest.approx(-1.0)
 
     def test_diagonal_e_sempre_1(self) -> None:
         rng = np.random.default_rng(42)  # semente fixa: teste reprodutivel
         series = {t: np.cumprod(1 + rng.normal(0, 0.01, 100)) * 100 for t in "ABC"}
-        tickers, matriz = matriz_correlacao(series)
+        tickers, matriz = matriz_correlacao(alinhadas(**series))
         for i in range(len(tickers)):
             assert matriz[i][i] == pytest.approx(1.0)
 
     def test_e_simetrica(self) -> None:
         rng = np.random.default_rng(7)
         series = {t: np.cumprod(1 + rng.normal(0, 0.01, 100)) * 100 for t in "ABC"}
-        _, matriz = matriz_correlacao(series)
+        _, matriz = matriz_correlacao(alinhadas(**series))
         assert np.allclose(matriz, matriz.T)
 
     def test_tickers_vem_ordenados(self) -> None:
@@ -147,7 +158,7 @@ class TestCorrelacao:
         rng = np.random.default_rng(1)
         nomes = ("VALE3", "ABEV3", "PETR4")
         series = {t: np.cumprod(1 + rng.normal(0, 0.01, 60)) * 100 for t in nomes}
-        tickers, _ = matriz_correlacao(series)
+        tickers, _ = matriz_correlacao(alinhadas(**series))
         assert tickers == ["ABEV3", "PETR4", "VALE3"]
 
 
@@ -158,7 +169,7 @@ class TestCovariancia:
         deles mudar de convencao, o outro denuncia."""
         rng = np.random.default_rng(3)
         precos = np.cumprod(1 + rng.normal(0, 0.015, 300)) * 100
-        _, cov = matriz_covariancia({"A": precos})
+        _, cov = matriz_covariancia(alinhadas(A=precos))
         vol = volatilidade_anualizada(retornos_diarios(precos))
         assert cov[0][0] == pytest.approx(vol**2, rel=1e-9)
 
@@ -167,8 +178,8 @@ class TestCovariancia:
         252 -- e as contas fecham, entao nada denuncia."""
         rng = np.random.default_rng(5)
         series = {t: np.cumprod(1 + rng.normal(0, 0.01, 200)) * 100 for t in "AB"}
-        _, anual = matriz_covariancia(series, anualizar=True)
-        _, diaria = matriz_covariancia(series, anualizar=False)
+        _, anual = matriz_covariancia(alinhadas(**series), anualizar=True)
+        _, diaria = matriz_covariancia(alinhadas(**series), anualizar=False)
         assert np.allclose(anual, diaria * PREGOES_POR_ANO)
 
 

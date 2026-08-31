@@ -30,7 +30,9 @@ sai e rotulado como estatistica -- nunca volta a ser tratado como dinheiro.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import date as date_type
 from decimal import Decimal
 
 import numpy as np
@@ -43,6 +45,82 @@ PREGOES_POR_ANO = 252
 # observacoes, o desvio-padrao e ruido -- devolver esse numero como "risco"
 # seria pior que devolver nada, porque parece informacao.
 MINIMO_OBSERVACOES = 20
+
+
+@dataclass(frozen=True)
+class SeriesAlinhadas:
+    """Series de precos com a garantia ESTRUTURAL de estarem alinhadas.
+
+    ## Por que um tipo, e nao um comentario
+
+    A versao anterior deste modulo recebia `dict[str, np.ndarray]` e a docstring
+    dizia "pressupoe series ja alinhadas". Isso nao e uma garantia -- e um pedido.
+    Duas series de mesmo tamanho mas de periodos diferentes passavam sem erro e
+    devolviam uma correlacao que era puro ruido. Nada estourava.
+
+    Com este tipo, a validacao acontece na CONSTRUCAO: se o objeto existe, ele
+    esta alinhado. Nao ha caminho no codigo que produza uma instancia invalida, e
+    nenhuma funcao adiante precisa reconferir. E a diferenca entre "confie em
+    mim" e "e impossivel errar".
+
+    Invariantes garantidas:
+      - toda serie tem exatamente um preco por data;
+      - as datas estao em ordem cronologica estrita, sem repeticao;
+      - ha pelo menos uma data.
+    """
+
+    datas: tuple[date_type, ...]
+    precos: Mapping[str, np.ndarray] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.datas:
+            raise ValueError("series alinhadas precisam de pelo menos uma data")
+
+        # Ordem cronologica estrita. Retorno diario e P_t / P_{t-1}: com as datas
+        # fora de ordem o calculo roda e devolve ruido. Data repetida significa
+        # dois precos para o mesmo dia -- dado corrompido na origem.
+        for anterior, seguinte in zip(self.datas, self.datas[1:], strict=False):
+            if seguinte <= anterior:
+                raise ValueError(f"datas fora de ordem ou repetidas: {anterior} -> {seguinte}")
+
+        for ticker, serie in self.precos.items():
+            if len(serie) != len(self.datas):
+                raise ValueError(
+                    f"{ticker}: {len(serie)} precos para {len(self.datas)} datas "
+                    "-- serie desalinhada"
+                )
+
+    @property
+    def tickers(self) -> list[str]:
+        """Sempre ordenados: quem consome a matriz indexa por posicao, e ordem
+        instavel trocaria os ativos silenciosamente entre duas chamadas."""
+        return sorted(self.precos)
+
+    @property
+    def inicio(self) -> date_type:
+        return self.datas[0]
+
+    @property
+    def fim(self) -> date_type:
+        return self.datas[-1]
+
+    def __len__(self) -> int:
+        return len(self.datas)
+
+    def subconjunto(self, tickers: Sequence[str]) -> SeriesAlinhadas:
+        """Recorta alguns ativos preservando o alinhamento.
+
+        Necessario porque o filtro de "historico suficiente" descarta ativos
+        depois do carregamento -- e reconstruir um dicionario a mao ali seria
+        justamente a brecha por onde o desalinhamento voltaria.
+        """
+        return SeriesAlinhadas(
+            datas=self.datas,
+            precos={t: self.precos[t] for t in tickers if t in self.precos},
+        )
+
+
+VAZIO = SeriesAlinhadas(datas=(date_type(1970, 1, 1),), precos={})
 
 
 @dataclass(frozen=True)
@@ -153,20 +231,19 @@ def metricas_do_ativo(
     )
 
 
-def matriz_de_retornos(series: dict[str, np.ndarray]) -> tuple[list[str], np.ndarray]:
+def matriz_de_retornos(series: SeriesAlinhadas) -> tuple[list[str], np.ndarray]:
     """Empilha os retornos num array (dias x ativos), na ordem dos tickers.
 
-    Pressupoe series JA ALINHADAS por data -- o alinhamento e feito ao carregar
-    do banco. Correlacionar arrays de tamanhos diferentes, ou de datas
-    diferentes, produz um numero que parece valido e nao significa nada: e o
-    erro mais silencioso desta area inteira.
+    Recebe `SeriesAlinhadas`, nao um dicionario: o alinhamento ja foi verificado
+    na construcao do objeto, entao esta funcao nao precisa confiar em ninguem nem
+    reconferir nada. Um `dict[str, ndarray]` sequer compila aqui.
     """
-    tickers = sorted(series)
-    retornos = np.column_stack([retornos_diarios(series[t]) for t in tickers])
+    tickers = series.tickers
+    retornos = np.column_stack([retornos_diarios(series.precos[t]) for t in tickers])
     return tickers, retornos
 
 
-def matriz_correlacao(series: dict[str, np.ndarray]) -> tuple[list[str], np.ndarray]:
+def matriz_correlacao(series: SeriesAlinhadas) -> tuple[list[str], np.ndarray]:
     """Correlacao de Pearson entre os RETORNOS.
 
     O numero que responde "diversificar nestes dois ativos adianta?". Correlacao
@@ -181,7 +258,7 @@ def matriz_correlacao(series: dict[str, np.ndarray]) -> tuple[list[str], np.ndar
 
 
 def matriz_covariancia(
-    series: dict[str, np.ndarray], anualizar: bool = True
+    series: SeriesAlinhadas, anualizar: bool = True
 ) -> tuple[list[str], np.ndarray]:
     """Covariancia dos retornos -- a entrada do otimizador de Markowitz.
 
