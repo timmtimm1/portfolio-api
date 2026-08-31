@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Roda semanalmente mesmo sem commit: uma dependencia sua pode ganhar uma CVE
+  # numa segunda-feira sem que voce tenha tocado em nada.
+  schedule:
+    - cron: "0 6 * * 1"
+
+# Cancela execucoes antigas do mesmo branch: sem isso, cinco pushes seguidos
+# ocupam a fila com quatro resultados que ninguem vai ler.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permissao minima. O padrao do GitHub e mais permissivo do que este workflow
+# precisa -- e um token de Actions comprometido com permissao de escrita pode
+# commitar no repositorio.
+permissions:
+  contents: read
+
+jobs:
+  qualidade:
+    name: Lint e tipagem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - name: ruff (estilo + regras de seguranca)
+        run: uv run ruff check .
+      - name: ruff format (checagem)
+        run: uv run ruff format --check .
+      - name: mypy (modo strict)
+        run: uv run mypy app
+
+  testes:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      # O Postgres nao aparece como `services:` aqui de proposito: o testcontainers
+      # sobe o container por conta propria. Assim o comando que roda no CI e
+      # exatamente o mesmo que roda na sua maquina -- nada de "passa local, quebra
+      # no CI" por diferenca de ambiente.
+      - name: pytest com cobertura
+        run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=85
+
+  seguranca:
+    name: Vulnerabilidades em dependencias
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      # Confere as versoes instaladas contra a base de vulnerabilidades do PyPI.
+      # E a defesa mais barata que existe: a maior parte das falhas de seguranca
+      # de uma aplicacao nao esta no codigo dela, esta no que ela importa.
+      - name: pip-audit
+        run: uvx pip-audit --strict --requirement <(uv export --no-hashes --no-dev --format requirements.txt)

@@ -27,6 +27,7 @@ dev = [
     "testcontainers[postgres]>=4.9",
     "ruff>=0.9",
     "mypy>=1.14",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.ruff]
@@ -35,15 +36,38 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
-# S101 = uso de assert; e exatamente o que pytest usa, entao so ignoramos em tests/
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+# S101 (assert) e o que o pytest usa. S105/S106 acusam credencial no codigo --
+# em teste, chave e senha fixas sao intencionais e nao vazam para producao.
+# As regras seguem ativas em app/, que e onde elas importam.
+"tests/*" = ["S101", "S105", "S106"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Um unico event loop para a sessao inteira. Por padrao o pytest-asyncio cria
+# um loop por teste -- e uma conexao asyncpg criada no loop da fixture de
+# sessao nao pode ser usada dentro de outro loop ("another operation is in
+# progress"). Com o escopo em "session", fixtures e testes dividem o mesmo loop.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = []
+
+[tool.coverage.run]
+source = ["app"]
+# O bridge async do SQLAlchemy usa greenlets. Sem declarar isso, o coverage perde
+# o rastro na primeira troca de contexto e reporta como "nao coberta" toda linha
+# depois do primeiro `await` que entra no ORM -- um numero de cobertura
+# silenciosamente falso, para baixo.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]
