@@ -19,6 +19,7 @@ dependencies = [
     "slowapi>=0.1.10",
     "httpx>=0.28.1",
     "numpy>=2.5.2",
+    "scipy>=1.18.1",
 ]
 
 [dependency-groups]
@@ -30,6 +31,8 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.14",
     "pytest-cov>=7.1.0",
+    "skfolio>=1.0.3",
+    "scipy-stubs>=1.18.1.0",
 ]
 
 [tool.ruff]

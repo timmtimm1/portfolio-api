@@ -18,7 +18,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 6 | Livro de transações e cálculo de posição | ✅ |
 | 7 | Cotações (brapi/yfinance) com cache | ✅ |
 | 8 | Métricas: retorno, volatilidade, correlação | ✅ |
-| 9 | Otimização de Markowitz | ⬜ |
+| 9 | Otimização de Markowitz | ✅ |
 | 10 | Snapshots diários da carteira | ⬜ |
 | 11 | Frontend com o gráfico da fronteira | ⬜ |
 | 12 | Deploy | ⬜ |
@@ -114,6 +114,51 @@ Convenções, cada uma com um erro comum associado:
 
 `Decimal` para dinheiro, `float` para estatística — a fronteira é uma função com nome
 (`para_float`), não `float(x)` espalhado pelo código.
+
+## Otimização de Markowitz
+
+Implementada **na mão** com `scipy.optimize` (SLSQP), não com uma biblioteca de
+otimização pronta. Resolve, para cada retorno-alvo:
+
+```
+minimizar    w' Σ w              (variância da carteira)
+sujeito a    w' μ  = μ*          (atinge o retorno desejado)
+             soma(w) = 1         (investe todo o capital)
+             0 ≤ wᵢ ≤ limite     (sem venda a descoberto, sem concentrar)
+```
+
+Resultado com dados reais da B3 (249 pregões, teto de 35% por ativo):
+
+```
+              ativos individuais:  volatilidade 24% a 29%
+
+MÍNIMA VARIÂNCIA   retorno 42.0%   volatilidade 14.1%   Sharpe 2.28
+  PETR4 33.9%  ABEV3 20.0%  VALE3 19.8%  WEGE3 14.5%  ITUB4 11.8%
+
+MÁXIMO SHARPE      retorno 47.3%   volatilidade 14.6%   Sharpe 2.55
+  PETR4 35.0%  VALE3 35.0%  WEGE3 15.1%  ABEV3 14.9%
+```
+
+A volatilidade cai de ~25% (ativos isolados) para **14,1%** na carteira — esse é o
+efeito que Markowitz formalizou: o risco de uma carteira não é a média dos riscos, e sim
+função de como os ativos se movem juntos.
+
+**Validação por três caminhos independentes** (`tests/test_optimizer.py`):
+
+1. **Fórmula fechada.** A mínima variância sem restrições tem solução analítica exata
+   (`w = Σ⁻¹1 / 1'Σ⁻¹1`). Diferença medida: **1.7e-15**.
+2. **Propriedades.** Nenhuma de 500 carteiras aleatórias tem variância menor que a
+   encontrada; nenhuma de 300 tem Sharpe maior.
+3. **`skfolio`.** Implementação independente e madura, com as mesmas restrições: pesos
+   diferem em <2e-3, Sharpe em **1.9e-9**.
+
+**Limitações que o código não esconde.** O retorno esperado é estimado sobre o histórico,
+e essa é a parte frágil do modelo — pequenas mudanças na janela produzem carteiras bem
+diferentes. Por isso a carteira de **mínima variância é mais confiável** que a de máximo
+Sharpe: ela não usa retorno esperado, só covariância, que é bem mais estável. E por isso
+existe o limite por ativo: sem ele, o otimizador aloca quase tudo no papel que mais subiu
+na amostra — ótimo para o passado, o oposto de diversificar. A resposta sempre inclui um
+campo `aviso` com essa ressalva.
 
 ## Decisões de segurança
 
