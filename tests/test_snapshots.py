@@ -250,3 +250,103 @@ class TestHistorico:
     async def test_limite_tem_teto(self, client: AsyncClient) -> None:
         _, h = await usuario_logado(client)
         assert (await client.get("/portfolio/snapshots?limit=99999", headers=h)).status_code == 422
+
+
+class TestBackfill:
+    """Reconstrucao de snapshots passados a partir de `price_history`.
+
+    Nao contradiz o motivo de o snapshot existir: a cotacao ATUAL e sobrescrita
+    no cache, mas o FECHAMENTO de cada dia esta guardado. Onde ha fechamento, a
+    foto daquele dia e reconstruivel.
+    """
+
+    async def test_usa_a_posicao_vigente_em_cada_dia(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O teste que importa.
+
+        Compra 100 em 05/01 e mais 100 em 20/01. O snapshot do dia 10 tem que
+        refletir 100 acoes, nao 200. Ignorar isso produziria um grafico em que a
+        carteira sempre teve o tamanho de hoje -- a forma mais convincente de
+        mentir com um grafico.
+        """
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models.asset import PriceHistory
+        from app.services import snapshot_service
+
+        ativo = await criar_ativo(db, ticker="PETR4")
+        base = date(2026, 1, 1)
+        for i in range(30):
+            db.add(
+                PriceHistory(
+                    asset_id=ativo.id, date=base + timedelta(days=i), close=Decimal("25.00")
+                )
+            )
+        await db.commit()
+
+        email, h = await usuario_logado(client)
+        await client.post(
+            "/transactions",
+            json=op(quantity="100", price="20.00", traded_at="2026-01-05"),
+            headers=h,
+        )
+        await client.post(
+            "/transactions",
+            json=op(quantity="100", price="20.00", traded_at="2026-01-20"),
+            headers=h,
+        )
+
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        await snapshot_service.backfill(db, usuario.id, desde=base)
+
+        dia_10 = (
+            await db.execute(
+                select(PortfolioSnapshot).where(PortfolioSnapshot.date == date(2026, 1, 10))
+            )
+        ).scalar_one()
+        dia_25 = (
+            await db.execute(
+                select(PortfolioSnapshot).where(PortfolioSnapshot.date == date(2026, 1, 25))
+            )
+        ).scalar_one()
+
+        assert dia_10.valor_mercado == 2500  # 100 x 25
+        assert dia_25.valor_mercado == 5000  # 200 x 25
+
+    async def test_nao_gera_ponto_antes_da_primeira_compra(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models.asset import PriceHistory
+        from app.services import snapshot_service
+
+        ativo = await criar_ativo(db, ticker="PETR4")
+        base = date(2026, 1, 1)
+        for i in range(30):
+            db.add(
+                PriceHistory(
+                    asset_id=ativo.id, date=base + timedelta(days=i), close=Decimal("25.00")
+                )
+            )
+        await db.commit()
+
+        email, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(traded_at="2026-01-15"), headers=h)
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+
+        gravados = await snapshot_service.backfill(db, usuario.id, desde=base)
+
+        primeiro = await db.scalar(select(func.min(PortfolioSnapshot.date)))
+        assert primeiro == date(2026, 1, 15)
+        assert gravados == 16  # dias 15 a 30
+
+    async def test_sem_transacoes_nao_faz_nada(self, client: AsyncClient, db: AsyncSession) -> None:
+        from app.services import snapshot_service
+
+        email, _ = await usuario_logado(client)
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        assert await snapshot_service.backfill(db, usuario.id, desde=date(2026, 1, 1)) == 0

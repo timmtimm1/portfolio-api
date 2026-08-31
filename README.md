@@ -20,7 +20,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 8 | Métricas: retorno, volatilidade, correlação | ✅ |
 | 9 | Otimização de Markowitz | ✅ |
 | 10 | Snapshots diários da carteira | ✅ |
-| 11 | Frontend com o gráfico da fronteira | ⬜ |
+| 11 | Frontend com o gráfico da fronteira | ✅ |
 | 12 | Deploy | ⬜ |
 
 ## Stack
@@ -219,6 +219,28 @@ Cada uma está justificada na docstring do módulo correspondente.
 - **`pip-audit` no CI**, semanalmente — a maior parte das falhas de uma aplicação não
   está no código dela, está no que ela importa.
 
+## Frontend
+
+Painel escuro servido pela **própria API** em `/app` — sem build, sem deploy separado e,
+o que mais importa, **sem CORS**: página e API compartilham a origem, então o cookie
+httpOnly do refresh token viaja normalmente. Um frontend em outro domínio exigiria
+`SameSite=None`, enfraquecendo justamente a proteção contra CSRF.
+
+Quatro telas: visão geral (KPIs + evolução da carteira), posições com matriz de
+correlação, fronteira eficiente interativa e livro de transações. HTML/CSS/JS puros,
+Chart.js via CDN — nenhuma dependência de build.
+
+Duas decisões de segurança governam o cliente, e há teste no CI para cada uma:
+
+- **O access token vive numa variável, nunca em `localStorage`.** localStorage é legível
+  por qualquer script da página. A sessão é retomada pelo cookie httpOnly, que o
+  JavaScript não consegue ler nem vazar.
+- **Nenhum `innerHTML` com dado da API.** Todo texto entra por `textContent`: um nome de
+  ativo com `<img onerror=...>` vira texto, não script.
+
+Os testes também garantem que o HTML não tem script inline nem `onclick=` — a CSP proíbe
+os dois, e uma página que os use **carrega mas não funciona**, reclamando só no console.
+
 ## Rodando localmente
 
 ```bash
@@ -241,6 +263,13 @@ uv run python -m scripts.seed_b3 --origem ~/Projects/mercado_financeiro
 
 O script é idempotente (upsert por chave natural) e insere em lotes de 5.000 linhas:
 37 mil `INSERT` individuais levariam minutos, o lote leva segundos.
+
+Para reconstruir o histórico da carteira a partir desses fechamentos (em vez de esperar
+meses para o gráfico ganhar forma):
+
+```bash
+uv run python -m scripts.backfill_snapshots --email voce@exemplo.com --desde 2026-01-01
+```
 
 ## Testes
 

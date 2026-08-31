@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import cast
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
@@ -83,6 +86,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(transactions.router, prefix=settings.API_V1_PREFIX)
     app.include_router(metrics.router, prefix=settings.API_V1_PREFIX)
     app.include_router(snapshots.router, prefix=settings.API_V1_PREFIX)
+
+    # Frontend servido pela PROPRIA API.
+    #
+    # Sem deploy separado, sem build, e -- o que mais importa -- sem CORS: a
+    # pagina e a API compartilham a origem, entao o cookie httpOnly do refresh
+    # token viaja normalmente. Um frontend em outro dominio exigiria
+    # `SameSite=None`, que enfraquece justamente a protecao contra CSRF que
+    # escolhemos na Etapa 3.
+    #
+    # `check_dir=False` evita quebrar o boot num ambiente onde a pasta nao foi
+    # empacotada (um container mal montado sobe sem frontend, mas com a API viva).
+    estaticos = Path(__file__).parent / "static"
+    app.mount(
+        "/app",
+        StaticFiles(directory=estaticos, html=True, check_dir=False),
+        name="frontend",
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def raiz() -> RedirectResponse:
+        return RedirectResponse(url="/app/")
+
     return app
 
 

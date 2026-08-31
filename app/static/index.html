@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Tracker</title>
+<link rel="stylesheet" href="/app/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237b5cff'/><path d='M9 21V15M16 21V11M23 21V17' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+</head>
+<body>
+
+<!-- ══ LOGIN ══ -->
+<div id="login" class="login-tela">
+  <form class="login-card" id="form-login" autocomplete="on">
+    <div class="marca marca--grande">
+      <span class="marca-icone" aria-hidden="true"></span>
+      <span>Portfolio Tracker</span>
+    </div>
+    <p class="login-sub">Carteira da B3 com análise de risco e fronteira eficiente</p>
+
+    <label class="campo">
+      <span>E-mail</span>
+      <input type="email" id="email" name="username" required autocomplete="username" placeholder="voce@exemplo.com">
+    </label>
+    <label class="campo">
+      <span>Senha</span>
+      <input type="password" id="senha" name="password" required autocomplete="current-password" placeholder="••••••••••••">
+    </label>
+
+    <p class="erro" id="login-erro" role="alert" hidden></p>
+    <button class="btn btn--primario" type="submit" id="btn-entrar">Entrar</button>
+    <p class="login-rodape">Não tem conta? <button type="button" class="link" id="btn-criar">Criar agora</button></p>
+  </form>
+</div>
+
+<!-- ══ APLICAÇÃO ══ -->
+<div id="app" class="shell" hidden>
+
+  <aside class="lateral">
+    <div class="marca">
+      <span class="marca-icone" aria-hidden="true"></span>
+      <span>Portfolio</span>
+    </div>
+
+    <p class="lateral-titulo">Principal</p>
+    <nav class="nav">
+      <button class="nav-item is-ativo" data-vista="visao"><span class="nav-ic" data-ic="grid"></span>Visão geral<span class="nav-seta">›</span></button>
+      <button class="nav-item" data-vista="posicoes"><span class="nav-ic" data-ic="wallet"></span>Posições</button>
+      <button class="nav-item" data-vista="fronteira"><span class="nav-ic" data-ic="chart"></span>Fronteira</button>
+      <button class="nav-item" data-vista="transacoes"><span class="nav-ic" data-ic="list"></span>Transações</button>
+    </nav>
+
+    <div class="lateral-rodape">
+      <div class="cartao-dica">
+        <span class="dica-ic" aria-hidden="true"></span>
+        <strong>Markowitz</strong>
+        <p>A carteira ótima não é a soma dos melhores ativos — é a combinação que se move melhor junta.</p>
+        <button class="btn btn--fantasma" data-vista="fronteira">Ver fronteira</button>
+      </div>
+      <button class="btn btn--sair" id="btn-sair">Sair</button>
+    </div>
+  </aside>
+
+  <main class="principal">
+    <header class="topo">
+      <div class="busca">
+        <span class="busca-ic" aria-hidden="true"></span>
+        <input type="search" id="busca" placeholder="Buscar ativo na B3 (PETR4, VALE3…)" autocomplete="off">
+        <div class="busca-resultados" id="busca-resultados" hidden></div>
+      </div>
+      <div class="usuario">
+        <div class="usuario-txt">
+          <strong id="usuario-email">—</strong>
+          <span>Investidor</span>
+        </div>
+        <div class="avatar" id="avatar">—</div>
+      </div>
+    </header>
+
+    <!-- ── VISÃO GERAL ── -->
+    <section class="vista" data-vista="visao">
+      <div class="titulo-linha">
+        <h1>Visão geral</h1>
+        <span class="selo" id="selo-atualizado">—</span>
+      </div>
+
+      <div class="grade-topo">
+        <div class="kpis">
+          <article class="cartao kpi">
+            <span class="kpi-ic" data-ic="wallet"></span>
+            <p class="kpi-rot">Valor de mercado</p>
+            <p class="kpi-val" id="kpi-mercado">—</p>
+          </article>
+          <article class="cartao kpi">
+            <span class="kpi-ic" data-ic="cost"></span>
+            <p class="kpi-rot">Custo total</p>
+            <p class="kpi-val" id="kpi-custo">—</p>
+          </article>
+          <article class="cartao kpi">
+            <span class="kpi-ic" data-ic="up"></span>
+            <p class="kpi-rot">Resultado não realizado</p>
+            <p class="kpi-val" id="kpi-nao-realizado">—</p>
+          </article>
+          <article class="cartao kpi">
+            <span class="kpi-ic" data-ic="check"></span>
+            <p class="kpi-rot">Resultado realizado</p>
+            <p class="kpi-val" id="kpi-realizado">—</p>
+          </article>
+        </div>
+
+        <article class="cartao-destaque">
+          <p class="destaque-rot">Patrimônio investido</p>
+          <p class="destaque-val" id="destaque-total">—</p>
+          <p class="destaque-var" id="destaque-var">—</p>
+          <div class="destaque-rodape">
+            <span id="destaque-ativos">—</span>
+            <span id="destaque-fonte">—</span>
+          </div>
+        </article>
+      </div>
+
+      <article class="cartao grafico-grande">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Evolução da carteira</h2>
+            <p class="sub">Valor de mercado × custo, por pregão</p>
+          </div>
+          <div class="legenda" id="legenda-evolucao"></div>
+        </div>
+        <div class="tela-grafico"><canvas id="g-evolucao"></canvas></div>
+      </article>
+
+      <div class="grade-baixo">
+        <article class="cartao">
+          <div class="cartao-cabeca">
+            <div><h2>Posições</h2><p class="sub">Preço médio e resultado por ativo</p></div>
+            <button class="link" data-vista="posicoes">Ver todas</button>
+          </div>
+          <div id="lista-posicoes" class="lista"></div>
+        </article>
+
+        <article class="cartao">
+          <div class="cartao-cabeca">
+            <div><h2>Últimas operações</h2><p class="sub">Extrato do livro</p></div>
+            <button class="link" data-vista="transacoes">Ver todas</button>
+          </div>
+          <div id="lista-operacoes" class="lista"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── POSIÇÕES ── -->
+    <section class="vista" data-vista="posicoes" hidden>
+      <div class="titulo-linha"><h1>Posições</h1></div>
+      <article class="cartao">
+        <div class="tabela-envolve">
+          <table class="tabela" id="tabela-posicoes">
+            <thead><tr>
+              <th>Ativo</th><th class="num">Qtd.</th><th class="num">Preço médio</th>
+              <th class="num">Cotação</th><th class="num">Custo</th><th class="num">Valor</th>
+              <th class="num">Resultado</th><th class="num">Var.</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="cartao">
+        <div class="cartao-cabeca">
+          <div><h2>Correlação entre os retornos</h2>
+          <p class="sub">Perto de 1 = caem juntos. Carteira que cai junta não é diversificada.</p></div>
+        </div>
+        <div id="matriz-correlacao" class="matriz"></div>
+      </article>
+    </section>
+
+    <!-- ── FRONTEIRA ── -->
+    <section class="vista" data-vista="fronteira" hidden>
+      <div class="titulo-linha">
+        <h1>Fronteira eficiente</h1>
+        <div class="controles">
+          <label class="controle">
+            <span>Máx. por ativo</span>
+            <select id="peso-maximo">
+              <option value="0.25">25%</option>
+              <option value="0.35" selected>35%</option>
+              <option value="0.5">50%</option>
+              <option value="1">Sem limite</option>
+            </select>
+          </label>
+          <button class="btn btn--primario btn--pequeno" id="btn-otimizar">Recalcular</button>
+        </div>
+      </div>
+
+      <article class="cartao grafico-grande">
+        <div class="cartao-cabeca">
+          <div><h2>Risco × retorno</h2><p class="sub">Cada ponto é uma carteira possível</p></div>
+          <div class="legenda">
+            <span class="lg"><i style="background:#7b5cff"></i>Fronteira</span>
+            <span class="lg"><i style="background:#35d6e8"></i>Mínima variância</span>
+            <span class="lg"><i style="background:#ff4fa3"></i>Máximo Sharpe</span>
+            <span class="lg"><i style="background:#f5b54a"></i>Sua carteira</span>
+          </div>
+        </div>
+        <div class="tela-grafico"><canvas id="g-fronteira"></canvas></div>
+      </article>
+
+      <div class="grade-carteiras" id="carteiras-sugeridas"></div>
+      <p class="aviso" id="aviso-modelo"></p>
+    </section>
+
+    <!-- ── TRANSAÇÕES ── -->
+    <section class="vista" data-vista="transacoes" hidden>
+      <div class="titulo-linha">
+        <h1>Transações</h1>
+        <button class="btn btn--primario btn--pequeno" id="btn-nova">Nova operação</button>
+      </div>
+
+      <form class="cartao form-op" id="form-op" hidden>
+        <div class="form-grade">
+          <label class="campo"><span>Ativo</span><input id="op-ticker" placeholder="PETR4" required maxlength="6"></label>
+          <label class="campo"><span>Operação</span><select id="op-lado"><option value="compra">Compra</option><option value="venda">Venda</option></select></label>
+          <label class="campo"><span>Quantidade</span><input id="op-qtd" type="number" step="any" min="0" required placeholder="100"></label>
+          <label class="campo"><span>Preço</span><input id="op-preco" type="number" step="any" min="0" required placeholder="20,00"></label>
+          <label class="campo"><span>Taxas</span><input id="op-taxas" type="number" step="any" min="0" value="0"></label>
+          <label class="campo"><span>Data</span><input id="op-data" type="date" required></label>
+        </div>
+        <p class="erro" id="op-erro" role="alert" hidden></p>
+        <div class="form-acoes">
+          <button type="button" class="btn btn--fantasma" id="op-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn--primario">Registrar</button>
+        </div>
+      </form>
+
+      <article class="cartao">
+        <div class="tabela-envolve">
+          <table class="tabela" id="tabela-operacoes">
+            <thead><tr>
+              <th>Data</th><th>Ativo</th><th>Operação</th>
+              <th class="num">Qtd.</th><th class="num">Preço</th><th class="num">Taxas</th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="/app/app.js"></script>
+</body>
+</html>
