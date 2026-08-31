@@ -7,6 +7,7 @@ exatamente o codigo que voce quer testar exaustivamente.
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -131,3 +132,35 @@ def decode_token(token: str, expected_type: TokenType) -> dict[str, Any]:
     if payload.get("typ") != expected_type:
         raise jwt.InvalidTokenError(f"tipo de token invalido: esperado {expected_type}")
     return payload
+
+
+# --- Refresh token (valor opaco, nao JWT -- ver app/models/refresh_token.py) ---
+
+# 48 bytes = 384 bits de entropia. Bem acima dos 128 bits que a OWASP pede para
+# um identificador de sessao; adivinhar por forca bruta e fisicamente inviavel.
+REFRESH_TOKEN_BYTES = 48
+
+
+def generate_refresh_token() -> tuple[str, str]:
+    """Gera (token em texto puro, hash para o banco).
+
+    `secrets` usa a fonte de aleatoriedade do sistema operacional. Nunca use
+    `random` para isso: o Mersenne Twister e reproduzivel -- com algumas saidas
+    observadas da-se para prever todas as proximas.
+
+    O texto puro so existe nesta funcao e na resposta HTTP. O banco recebe apenas
+    o hash, entao um dump vazado nao contem sessao utilizavel.
+    """
+    token = secrets.token_urlsafe(REFRESH_TOKEN_BYTES)
+    return token, hash_refresh_token(token)
+
+
+def hash_refresh_token(token: str) -> str:
+    """SHA-256 em hexadecimal (64 caracteres).
+
+    SHA-256 aqui, argon2 na senha: a diferenca e a entropia da entrada. Argon2 e
+    lento de proposito para compensar senha humana fraca. Um token de 384 bits
+    aleatorios nao precisa dessa compensacao -- e pagar 200ms a cada refresh seria
+    custo sem ganho.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()

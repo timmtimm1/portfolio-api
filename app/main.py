@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
+from starlette.types import ExceptionHandler
 
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
+from app.core.middleware import SecurityHeadersMiddleware
+from app.core.rate_limit import limiter
 from app.routers import auth, health
 
 
@@ -44,6 +50,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     )
+
+    # Rate limiting: o limiter fica no state porque os decoradores das rotas
+    # o buscam ali. O handler traduz o estouro em 429 com Retry-After.
+    app.state.limiter = limiter
+    # O handler do slowapi e tipado para RateLimitExceeded, mas o Starlette
+    # declara o parametro como Exception. O cast documenta que a incompatibilidade
+    # e so de assinatura -- o Starlette so chama este handler para essa excecao.
+    app.add_exception_handler(
+        RateLimitExceeded, cast(ExceptionHandler, _rate_limit_exceeded_handler)
+    )
+
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # CORS so entra se houver origem configurada. `allow_credentials=True` com
     # `allow_origins=["*"]` e proibido pelo proprio navegador e e o erro classico:

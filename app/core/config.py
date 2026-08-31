@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Onde o contador de rate limit e guardado. "memory://" e por processo;
+    # em producao com mais de um worker, use "redis://host:6379".
+    RATE_LIMIT_STORAGE: str = "memory://"
+    RATE_LIMIT_LOGIN: str = "5/minute"
+    RATE_LIMIT_REGISTER: str = "3/minute"
+
     # Origens permitidas para CORS. Lista explicita, nunca "*" junto com credenciais.
     #
     # `NoDecode` desliga o parse automatico de JSON que o pydantic-settings faz em
