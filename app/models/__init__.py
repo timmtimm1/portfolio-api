@@ -10,6 +10,7 @@ from app.models.asset import Asset, AssetType, PriceHistory
 from app.models.base import Base
 from app.models.quote import PriceQuote
 from app.models.refresh_token import RefreshToken
+from app.models.snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction, TransactionSide
 from app.models.user import User
 
@@ -18,6 +19,7 @@ __all__ = [
     "AssetType",
     "Base",
     "PriceHistory",
+    "PortfolioSnapshot",
     "PriceQuote",
     "RefreshToken",
     "Transaction",

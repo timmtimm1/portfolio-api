@@ -17,7 +17,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
 from app.core.middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import limiter
-from app.routers import assets, auth, health, metrics, transactions
+from app.routers import assets, auth, health, metrics, snapshots, transactions
 
 
 @asynccontextmanager
@@ -82,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(assets.router, prefix=settings.API_V1_PREFIX)
     app.include_router(transactions.router, prefix=settings.API_V1_PREFIX)
     app.include_router(metrics.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(snapshots.router, prefix=settings.API_V1_PREFIX)
     return app
 
 

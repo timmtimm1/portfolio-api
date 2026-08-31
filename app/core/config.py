@@ -11,6 +11,7 @@ no traceback. So sai com `.get_secret_value()`, chamada explicita e rastreavel.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -23,7 +24,14 @@ Environment = Literal["local", "test", "staging", "production"]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Em teste NAO lemos o .env.
+        #
+        # Sem isto, a suite herda a configuracao da maquina de quem roda: um
+        # teste que verifica "sem chave de servico, a rota nao existe" passa no
+        # CI (que nao tem .env) e falha na maquina do desenvolvedor que tem a
+        # chave preenchida -- ou, pior, o contrario. Teste cujo resultado
+        # depende do ambiente local nao prova nada.
+        env_file=None if os.getenv("ENVIRONMENT") == "test" else ".env",
         env_file_encoding="utf-8",
         # Rejeita variaveis desconhecidas: um typo em PORTFOLIO_SECRET_KEY vira erro
         # de boot, nao um segredo silenciosamente ignorado.
@@ -71,6 +79,17 @@ class Settings(BaseSettings):
     # indefinidamente e a aplicacao inteira para -- e a forma mais comum de uma
     # API cair por causa de um terceiro.
     HTTP_TIMEOUT_SECONDS: float = 5.0
+
+    # --- Acesso de servico -----------------------------------------------------
+    # Chave usada por processos automatizados (o cron de snapshots) para se
+    # autenticar. Diferente da senha de um usuario: nao ha pessoa para digitar,
+    # nao ha fluxo de renovacao, e ela precisa ser longa e aleatoria porque vive
+    # em texto puro num cofre de CI.
+    #
+    # `None` por padrao DESLIGA a rota de servico. Fail-closed: um deploy que
+    # esqueceu de definir a chave nao expoe um endpoint sem protecao -- ele
+    # simplesmente nao tem esse endpoint funcionando.
+    SERVICE_API_KEY: SecretStr | None = None
 
     # --- Metricas -------------------------------------------------------------
     # Taxa livre de risco anual usada no indice de Sharpe. No Brasil isso e o

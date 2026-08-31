@@ -19,7 +19,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 7 | Cotações (brapi/yfinance) com cache | ✅ |
 | 8 | Métricas: retorno, volatilidade, correlação | ✅ |
 | 9 | Otimização de Markowitz | ✅ |
-| 10 | Snapshots diários da carteira | ⬜ |
+| 10 | Snapshots diários da carteira | ✅ |
 | 11 | Frontend com o gráfico da fronteira | ⬜ |
 | 12 | Deploy | ⬜ |
 
@@ -159,6 +159,27 @@ Sharpe: ela não usa retorno esperado, só covariância, que é bem mais estáve
 existe o limite por ativo: sem ele, o otimizador aloca quase tudo no papel que mais subiu
 na amostra — ótimo para o passado, o oposto de diversificar. A resposta sempre inclui um
 campo `aviso` com essa ressalva.
+
+## Snapshots diários
+
+Um job no GitHub Actions fotografa todas as carteiras às 18h15 (Brasília), depois do
+fechamento da B3. É o **único dado do sistema que não é reconstruível**: a posição sai do
+livro a qualquer momento, mas o valor de mercado de ontem dependia da cotação de ontem,
+que já foi sobrescrita no cache.
+
+- **Idempotência imposta pelo schema**: a chave primária `(user_id, date)` garante uma
+  foto por dia. Rodar duas vezes atualiza a linha com a cotação mais recente — o cron
+  pode ter nova tentativa sem risco de duplicar histórico.
+- **Uma busca de cotação para todos os usuários.** Buscar por usuário seria N+1 contra a
+  API externa: 100 usuários com PETR4 = 100 consultas do mesmo preço, e a cota gratuita
+  de 15 mil chamadas/mês estoura em dias.
+- **Autenticação de máquina, não de pessoa.** Chave de serviço de 384 bits em cabeçalho
+  (nunca na URL — URLs vão para log de acesso e de proxy), comparada com
+  `secrets.compare_digest`. Uma comparação normal para no primeiro byte diferente, e essa
+  diferença de tempo é mensurável pela rede: o atacante descobre a chave um caractere por
+  vez. Sem chave configurada, a rota devolve **404** — fail-closed.
+- **Menor privilégio nos dois sentidos**: a chave de serviço não lê carteira de ninguém,
+  e o token de usuário não dispara o job.
 
 ## Decisões de segurança
 

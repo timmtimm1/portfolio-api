@@ -1,0 +1,75 @@
+name: Snapshot diario da carteira
+
+on:
+  schedule:
+    # 21:15 UTC = 18:15 em Brasilia (BRT, UTC-3), depois do fechamento da B3.
+    # Segunda a sexta. O GitHub avalia cron em UTC -- usar horario local aqui
+    # dispararia na hora errada metade do ano, em paises com horario de verao.
+    - cron: "15 21 * * 1-5"
+  # Permite disparo manual pela aba Actions (util para testar e para reprocessar
+  # um dia que falhou).
+  workflow_dispatch:
+  # Truque aprendido no mercado_financeiro: um workflow cujos unicos gatilhos sao
+  # `schedule` e `workflow_dispatch` pode nunca ser indexado pelo GitHub -- e
+  # `workflow_dispatch` exige que ele ja esteja indexado, um catch-22. Um `push`
+  # restrito ao proprio arquivo forca esse reconhecimento.
+  push:
+    paths:
+      - .github/workflows/snapshots.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  # Duas execucoes simultaneas nao corromperiam nada (o upsert e idempotente),
+  # mas gastariam cota do fornecedor de cotacoes a toa.
+  group: snapshots
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar se o deploy ja existe
+        id: check
+        run: |
+          if [ -z "${{ secrets.API_URL }}" ] || [ -z "${{ secrets.SERVICE_API_KEY }}" ]; then
+            echo "pronto=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::API_URL ou SERVICE_API_KEY nao configurados - pulando."
+          else
+            echo "pronto=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Disparar o snapshot
+        if: steps.check.outputs.pronto == 'true'
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          SERVICE_API_KEY: ${{ secrets.SERVICE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # --max-time protege contra o job ficar pendurado ate o timeout do
+          # runner (6h) se a API nao responder.
+          #
+          # --retry 3 com backoff: o free tier do Render hiberna apos 15 min sem
+          # trafego, e a primeira chamada pode levar ~1 min para acordar. Sem
+          # retry, o snapshot do dia se perderia por isso.
+          #
+          # A chave vai no CABECALHO, nunca na URL: URLs aparecem em log de
+          # acesso, em log de proxy e no historico do shell.
+          resposta=$(curl -sS --fail-with-body \
+            --max-time 180 --retry 3 --retry-delay 20 --retry-all-errors \
+            -X POST "$API_URL/api/v1/internal/snapshots/run" \
+            -H "X-Service-Key: $SERVICE_API_KEY" \
+            -H "Accept: application/json")
+
+          echo "$resposta"
+          # Falha explicita se nenhum snapshot foi gravado: um job que sempre
+          # "passa" mesmo sem fazer nada e pior que nenhum job, porque cria a
+          # falsa sensacao de que o historico esta sendo registrado.
+          echo "$resposta" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          print(f\"{d['snapshots_gravados']} snapshots de {d['usuarios_processados']} usuarios\", file=sys.stderr)
+          sys.exit(0 if d['snapshots_gravados'] >= 0 else 1)
+          "

@@ -1,0 +1,252 @@
+"""Testes dos snapshots e da autenticacao de maquina."""
+
+from __future__ import annotations
+
+from datetime import date
+
+from httpx import AsyncClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.snapshot import PortfolioSnapshot
+from app.models.user import User
+from tests.conftest import ProvedorFake
+from tests.factories import criar_ativo, op, segunda_conta, usuario_logado
+
+CHAVE = "chave-de-servico-de-teste-com-entropia-suficiente-aqui"
+
+
+class TestAutenticacaoDeMaquina:
+    """A chave de servico e um credencial DIFERENTE do login de usuario.
+
+    Um job de cron nao tem senha para digitar nem navegador para guardar cookie.
+    Se usasse o fluxo humano, precisaria de uma conta com senha no cofre do CI --
+    e essa conta teria acesso a tudo, quando so precisa disparar um calculo.
+    """
+
+    async def test_sem_chave_configurada_a_rota_nao_existe(self, client: AsyncClient) -> None:
+        """Fail-closed: um deploy que esqueceu a chave nao expoe endpoint
+        desprotegido -- ele simplesmente nao tem esse endpoint."""
+        resp = await client.post("/internal/snapshots/run")
+        assert resp.status_code == 404
+
+    async def test_chave_errada_e_recusada(self, client: AsyncClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._configurar(monkeypatch)
+        resp = await client.post(
+            "/internal/snapshots/run", headers={"X-Service-Key": "chave-do-atacante"}
+        )
+        assert resp.status_code == 401
+
+    async def test_chave_sem_o_ultimo_caractere_e_recusada(
+        self, client: AsyncClient, monkeypatch
+    ) -> None:  # type: ignore[no-untyped-def]
+        """A comparacao e em tempo constante (`secrets.compare_digest`): um
+        prefixo correto nao responde mais rapido que um totalmente errado."""
+        self._configurar(monkeypatch)
+        resp = await client.post("/internal/snapshots/run", headers={"X-Service-Key": CHAVE[:-1]})
+        assert resp.status_code == 401
+
+    async def test_token_de_usuario_nao_serve(self, client: AsyncClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Menor privilegio nos dois sentidos: o token de usuario nao dispara o
+        job, e a chave de servico nao le carteira de ninguem."""
+        self._configurar(monkeypatch)
+        _, headers = await usuario_logado(client)
+        assert (await client.post("/internal/snapshots/run", headers=headers)).status_code == 401
+
+    async def test_chave_de_servico_nao_da_acesso_a_dados(
+        self, client: AsyncClient, monkeypatch
+    ) -> None:  # type: ignore[no-untyped-def]
+        self._configurar(monkeypatch)
+        resp = await client.get("/portfolio/positions", headers={"X-Service-Key": CHAVE})
+        assert resp.status_code == 401
+
+    async def test_chave_correta_executa(self, client: AsyncClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._configurar(monkeypatch)
+        resp = await client.post("/internal/snapshots/run", headers={"X-Service-Key": CHAVE})
+        assert resp.status_code == 200
+
+    @staticmethod
+    def _configurar(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Injeta a chave sobrescrevendo a configuracao, sem tocar variavel de
+        ambiente global (que vazaria para os outros testes)."""
+        from pydantic import SecretStr
+
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "SERVICE_API_KEY", SecretStr(CHAVE), raising=False)
+
+
+class TestGravacao:
+    async def test_grava_a_foto_da_carteira(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        provedor.precos = {"PETR4": "25.00"}
+
+        resultado = await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+
+        assert resultado.snapshots_gravados == 1
+        linha = (await db.execute(select(PortfolioSnapshot))).scalar_one()
+        assert linha.custo_total == 2000
+        assert linha.valor_mercado == 2500
+        assert linha.resultado_nao_realizado == 500
+        assert linha.ativos == 1
+        assert linha.ativos_sem_cotacao == 0
+
+    async def test_rodar_duas_vezes_nao_duplica(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """Idempotencia imposta pelo SCHEMA -- a chave primaria (user_id, date) --
+        nao pela disciplina de quem chama. O cron pode ter nova tentativa sem
+        risco de duplicar historico."""
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        provedor.precos = {"PETR4": "25.00"}
+
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+
+        assert await db.scalar(select(func.count()).select_from(PortfolioSnapshot)) == 1
+
+    async def test_reexecucao_atualiza_com_a_cotacao_nova(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """DO UPDATE, nao DO NOTHING: rodar de novo deve refletir o preco mais
+        recente -- util quando a primeira execucao caiu antes do fechamento."""
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+
+        provedor.precos = {"PETR4": "25.00"}
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+        provedor.precos = {"PETR4": "30.00"}
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=0)
+
+        linha = (await db.execute(select(PortfolioSnapshot))).scalar_one()
+        assert linha.valor_mercado == 3000
+
+    async def test_carteira_vazia_nao_gera_ponto(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """Um ponto de valor zero por dia poluiria o historico de quem ainda nao
+        comecou a investir."""
+        from app.services import snapshot_service
+
+        await usuario_logado(client)
+        resultado = await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+        assert resultado.snapshots_gravados == 0
+
+    async def test_usuario_inativo_fica_de_fora(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        email, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        usuario.is_active = False
+        await db.commit()
+
+        resultado = await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+        assert resultado.snapshots_gravados == 0
+
+    async def test_ativo_sem_cotacao_entra_pelo_custo_e_e_registrado(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """O contador `ativos_sem_cotacao` e o que permite saber, meses depois,
+        que aquele ponto do grafico e menos confiavel."""
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        provedor.falha = True
+
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+
+        linha = (await db.execute(select(PortfolioSnapshot))).scalar_one()
+        assert linha.valor_mercado == 2000  # pelo custo
+        assert linha.ativos_sem_cotacao == 1
+
+    async def test_cotacao_e_buscada_uma_vez_para_todos_os_usuarios(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """O ponto de escalabilidade do job.
+
+        Buscar as cotacoes por usuario seria N+1 contra a API externa: com 100
+        usuarios que tem PETR4, seriam 100 consultas do mesmo preco. Com a cota
+        gratuita de 15 mil chamadas/mes, esse desenho estoura em dias.
+        """
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h1 = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h1)
+        h2 = await segunda_conta(client)
+        await client.post("/transactions", json=op(price="22.00"), headers=h2)
+
+        provedor.precos = {"PETR4": "25.00"}
+        provedor.chamadas.clear()
+        resultado = await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=0)
+
+        assert resultado.snapshots_gravados == 2
+        assert provedor.chamadas == [["PETR4"]]  # uma unica busca
+
+
+class TestHistorico:
+    async def test_exige_autenticacao(self, client: AsyncClient) -> None:
+        assert (await client.get("/portfolio/snapshots")).status_code == 401
+
+    async def test_devolve_apenas_os_proprios_pontos(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        from app.services import snapshot_service
+
+        await criar_ativo(db, ticker="PETR4")
+        _, h1 = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h1)
+        h2 = await segunda_conta(client)
+        provedor.precos = {"PETR4": "25.00"}
+        await snapshot_service.gravar_de_todos(db, provedor, ttl_segundos=900)
+
+        assert len((await client.get("/portfolio/snapshots", headers=h1)).json()) == 1
+        assert (await client.get("/portfolio/snapshots", headers=h2)).json() == []
+
+    async def test_ordem_do_mais_recente_para_o_mais_antigo(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        email, h = await usuario_logado(client)
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        for dia in (date(2026, 8, 10), date(2026, 8, 12), date(2026, 8, 11)):
+            db.add(
+                PortfolioSnapshot(
+                    user_id=usuario.id,
+                    date=dia,
+                    custo_total=1000,
+                    valor_mercado=1100,
+                    resultado_nao_realizado=100,
+                    resultado_realizado=0,
+                    ativos=1,
+                    ativos_sem_cotacao=0,
+                )
+            )
+        await db.commit()
+
+        datas = [p["date"] for p in (await client.get("/portfolio/snapshots", headers=h)).json()]
+        assert datas == sorted(datas, reverse=True)
+
+    async def test_limite_tem_teto(self, client: AsyncClient) -> None:
+        _, h = await usuario_logado(client)
+        assert (await client.get("/portfolio/snapshots?limit=99999", headers=h)).status_code == 422
