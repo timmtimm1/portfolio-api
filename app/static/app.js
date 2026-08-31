@@ -19,6 +19,10 @@ const API = "/api/v1";
 let token = null;         // só em memória, de propósito
 let usuarioEmail = "";
 const graficos = {};
+let ultimaEvolucao = null;
+// Percentual por padrao: em reais, uma carteira que cresceu esmaga a escala e
+// o CDI vira uma linha reta, sem informacao nenhuma.
+let escala = "pct";
 
 /* ═══ HTTP ═══ */
 
@@ -198,9 +202,10 @@ document.addEventListener("click", (ev) => {
 /* ═══ Visão geral ═══ */
 
 async function carregarVisao() {
-  const [resumo, snapshots] = await Promise.all([
+  const indexador = $("#indexador").value;
+  const [resumo, evolucao] = await Promise.all([
     api("/portfolio/summary"),
-    api("/portfolio/snapshots?limit=250"),
+    api(`/portfolio/evolution?limit=250${indexador ? `&indexador=${indexador}` : ""}`),
   ]);
 
   const t = resumo.totals;
@@ -222,7 +227,8 @@ async function carregarVisao() {
     ? `atualizado ${new Date(quando).toLocaleString("pt-BR")}`
     : "sem cotação disponível";
 
-  desenharEvolucao(snapshots.slice().reverse());
+  ultimaEvolucao = evolucao;
+  desenharEvolucao(evolucao);
   renderPosicoesResumo(resumo.positions);
   renderOperacoesResumo(await api("/transactions?limit=5"));
 }
@@ -307,45 +313,145 @@ function gradiente(ctx, cor) {
   return g;
 }
 
-function desenharEvolucao(pontos) {
+function desenharEvolucao(evolucao) {
   const canvas = $("#g-evolucao");
   const ctx = canvas.getContext("2d");
+  const selo = $("#selo-cdi");
   graficos.evolucao?.destroy();
 
-  if (!pontos.length) return;
+  const pontos = evolucao.pontos;
+  if (!pontos.length) {
+    selo.hidden = true;
+    return;
+  }
+
+  const emPct = escala === "pct";
+  const nomeBench = evolucao.benchmark?.nome;
+  $("#sub-evolucao").textContent = emPct
+    ? `Rentabilidade acumulada${nomeBench ? ` × ${nomeBench}` : ""}`
+    : `Valor de mercado × custo${nomeBench ? ` × ${nomeBench}` : ""}`;
+
+  const conjuntos = [];
+  const rotulos = [];
+
+  if (emPct) {
+    // Retorno ponderado pelo tempo: isola o efeito do mercado dos aportes.
+    // O percentual ingênuo (valor/custo − 1) despencaria a cada aporte, sem o
+    // mercado ter mexido.
+    conjuntos.push({
+      label: "Carteira",
+      data: evolucao.rentabilidade.map((p) => Number(p.carteira) * 100),
+      borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+      borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+    });
+    rotulos.push(["#ff4fa3", "Carteira"]);
+
+    if (nomeBench) {
+      conjuntos.push({
+        label: nomeBench,
+        data: evolucao.rentabilidade.map((p) =>
+          p.benchmark === null ? null : Number(p.benchmark) * 100
+        ),
+        borderColor: "#f5b54a", borderWidth: 2, fill: false, tension: .35,
+        pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
+      });
+      rotulos.push(["#f5b54a", nomeBench]);
+    }
+  } else {
+    conjuntos.push(
+      {
+        label: "Valor de mercado", data: pontos.map((p) => Number(p.valor_mercado)),
+        borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+        borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+      },
+      {
+        label: "Custo", data: pontos.map((p) => Number(p.custo_total)),
+        borderColor: "#35d6e8", borderWidth: 1.8, borderDash: [5, 5],
+        fill: false, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+      },
+    );
+    rotulos.push(["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]);
+
+    if (evolucao.benchmark) {
+      // Alinhamos por DATA, não por posição: o CDI não rende em feriado, então
+      // as séries podem ter comprimentos diferentes. Casar por índice
+      // deslocaria a curva inteira sem nenhum erro aparente.
+      const porData = new Map(evolucao.benchmark.pontos.map((p) => [p.date, Number(p.valor)]));
+      conjuntos.push({
+        label: nomeBench,
+        data: pontos.map((p) => porData.get(p.date) ?? null),
+        borderColor: "#f5b54a", borderWidth: 2, fill: false, tension: .35,
+        pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
+      });
+      rotulos.push(["#f5b54a", nomeBench]);
+    }
+  }
+
+  const formatarEixo = emPct
+    ? (v) => `${v.toFixed(2)}%`
+    : (v) => brl.format(v).replace(/\s/g, "");
 
   graficos.evolucao = new Chart(ctx, {
     type: "line",
-    data: {
-      labels: pontos.map((p) => dataBR(p.date)),
-      datasets: [
-        {
-          label: "Valor de mercado", data: pontos.map((p) => Number(p.valor_mercado)),
-          borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
-          borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
-        },
-        {
-          label: "Custo", data: pontos.map((p) => Number(p.custo_total)),
-          borderColor: "#35d6e8", borderWidth: 1.8, borderDash: [5, 5],
-          fill: false, tension: .35, pointRadius: 0, pointHoverRadius: 5,
-        },
-      ],
-    },
+    data: { labels: pontos.map((p) => dataBR(p.date)), datasets: conjuntos },
     options: {
-      ...base({ ticks: { color: EIXO, callback: (v) => brl.format(v).replace(/\s/g, "") } }),
+      ...base({ ticks: { color: EIXO, callback: formatarEixo } }),
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
+          padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+          callbacks: {
+            label: (c) =>
+              `${c.dataset.label}: ${
+                emPct ? `${c.parsed.y >= 0 ? "+" : ""}${c.parsed.y.toFixed(2)}%` : brl.format(c.parsed.y)
+              }`,
+          },
+        },
+      },
     },
   });
 
   const legenda = $("#legenda-evolucao");
   limpar(legenda);
-  for (const [cor, rotulo] of [["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]]) {
-    const s = el("span", "lg");
+  for (const [cor, rotulo] of rotulos) {
+    const sp = el("span", "lg");
     const i = el("i");
     i.style.background = cor;
-    s.append(i, document.createTextNode(rotulo));
-    legenda.append(s);
+    sp.append(i, document.createTextNode(rotulo));
+    legenda.append(sp);
+  }
+
+  const c = evolucao.comparacao;
+  if (c && c.excesso_pontos_percentuais !== null) {
+    const excesso = Number(c.excesso_pontos_percentuais);
+    selo.className = `selo-comparacao ${excesso >= 0 ? "acima" : "abaixo"}`;
+    selo.textContent =
+      excesso >= 0
+        ? `${pct(excesso / 100, 2)} acima do ${nomeBench}`
+        : `${pct(excesso / 100, 2)} abaixo do ${nomeBench}`;
+    selo.title = `Carteira ${c.carteira_percentual}% · ${nomeBench} ${c.benchmark_percentual}%`;
+    selo.hidden = false;
+  } else {
+    selo.hidden = true;
   }
 }
+
+document.querySelectorAll("[data-escala]").forEach((botao) => {
+  botao.addEventListener("click", () => {
+    escala = botao.dataset.escala;
+    document
+      .querySelectorAll("[data-escala]")
+      .forEach((b) => b.classList.toggle("is-ativo", b === botao));
+    // Redesenha com os dados que já estão em memória: trocar a unidade do
+    // gráfico não é motivo para uma requisição nova.
+    if (ultimaEvolucao) desenharEvolucao(ultimaEvolucao);
+  });
+});
+
+$("#indexador").addEventListener("change", () => {
+  carregarVisao().catch(() => {});
+});
 
 /* ═══ Posições ═══ */
 

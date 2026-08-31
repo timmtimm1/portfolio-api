@@ -311,6 +311,37 @@ h1, h2, h3, p { margin: 0; }
 }
 .tela-grafico { height: 320px; position: relative; }
 .legenda { display: flex; gap: 14px; flex-wrap: wrap; }
+.legenda-rodape { justify-content: center; margin-top: 14px; }
+.cabeca-acoes { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.alternador {
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--superficie-2); border: 1px solid var(--borda); border-radius: 999px;
+}
+.alternador button {
+  font-size: 11.5px; font-weight: 600; color: var(--txt-3);
+  padding: 4px 12px; border-radius: 999px;
+}
+.alternador button.is-ativo { background: rgba(123, 92, 255, .22); color: var(--txt); }
+
+.seletor-mini {
+  background: var(--superficie-2); border: 1px solid var(--borda);
+  border-radius: 999px; padding: 6px 12px; font-size: 12px; outline: none;
+  color: var(--txt-2);
+}
+/* Verde quando bateu o indexador, vermelho quando ficou atrás. A cor carrega a
+   resposta antes de a pessoa ler o número. */
+.selo-comparacao {
+  font-size: 12px; font-weight: 650; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.selo-comparacao.acima {
+  color: var(--verde); background: rgba(52, 211, 153, .12);
+  border-color: rgba(52, 211, 153, .3);
+}
+.selo-comparacao.abaixo {
+  color: var(--vermelho); background: rgba(251, 113, 133, .12);
+  border-color: rgba(251, 113, 133, .3);
+}
 .lg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--txt-2); }
 .lg i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 

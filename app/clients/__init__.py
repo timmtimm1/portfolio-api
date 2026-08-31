@@ -7,12 +7,18 @@ from functools import lru_cache
 import httpx
 
 from app.clients.base import ProvedorDeCotacoes
+from app.clients.bcb import BcbClient
 from app.clients.brapi import BrapiClient
 from app.clients.composto import ProvedorEncadeado
 from app.clients.yahoo import YahooClient
 from app.core.config import get_settings
 
-__all__ = ["fechar_http_client", "get_http_client", "get_provedor_de_cotacoes"]
+__all__ = [
+    "fechar_http_client",
+    "get_bcb_client",
+    "get_http_client",
+    "get_provedor_de_cotacoes",
+]
 
 
 @lru_cache
@@ -52,6 +58,12 @@ def get_provedor_de_cotacoes() -> ProvedorDeCotacoes:
     client = get_http_client()
     token = settings.BRAPI_TOKEN.get_secret_value() if settings.BRAPI_TOKEN else None
     return ProvedorEncadeado(BrapiClient(client, token), YahooClient(client))
+
+
+@lru_cache
+def get_bcb_client() -> BcbClient:
+    """Cliente do Banco Central, compartilhando o mesmo pool HTTP."""
+    return BcbClient(get_http_client())
 
 
 async def fechar_http_client() -> None:

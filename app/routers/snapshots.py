@@ -7,11 +7,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.core.deps import CurrentUser, DbDep, ProvedorDep, SettingsDep
+from app.core.deps import BcbDep, CurrentUser, DbDep, ProvedorDep, SettingsDep
 from app.core.rate_limit import limiter
 from app.core.service_auth import ChaveDeServico
+from app.models.benchmark import Indexador
+from app.schemas.evolution import (
+    BenchmarkPoint,
+    BenchmarkSerie,
+    Comparacao,
+    EvolutionResponse,
+    RentabilidadePoint,
+)
 from app.schemas.snapshot import SnapshotRead, SnapshotRunResult
-from app.services import snapshot_service
+from app.services import benchmark_service, snapshot_service
 
 router = APIRouter(tags=["snapshots"])
 
@@ -38,6 +46,83 @@ async def historico(
     """
     pontos = await snapshot_service.historico(db, usuario.id, desde=desde, ate=ate, limit=limit)
     return [SnapshotRead.model_validate(p) for p in pontos]
+
+
+@router.get(
+    "/portfolio/evolution",
+    response_model=EvolutionResponse,
+    summary="Evolucao da carteira comparada ao CDI ou a Selic",
+)
+async def evolucao(
+    usuario: CurrentUser,
+    db: DbDep,
+    bcb: BcbDep,
+    indexador: Annotated[Indexador, Query(description="cdi ou selic")] = Indexador.CDI,
+    desde: Annotated[date_type | None, Query()] = None,
+    ate: Annotated[date_type | None, Query()] = None,
+    limit: Annotated[int, Query(ge=2, le=LIMITE_MAXIMO)] = 250,
+) -> EvolutionResponse:
+    """A carteira contra o CDI, respondendo "eu bati o CDI?".
+
+    A curva do indexador nao e a taxa acumulada pura: e quanto o MESMO dinheiro,
+    aplicado nos MESMOS dias, renderia no CDI. Isso importa quando ha aportes --
+    aplicar a taxa so sobre o valor inicial subestima o benchmark e faz a
+    carteira parecer melhor do que foi.
+
+    Fonte: SGS do Banco Central (series 12 e 11), oficial e publica. Taxa passada
+    nao muda, entao ela e gravada uma vez e nunca mais buscada.
+    """
+    snapshots, curva, taxas, motivo = await benchmark_service.evolucao_comparada(
+        db, bcb, usuario.id, indexador, desde=desde, ate=ate, limite=limit
+    )
+    pontos = [SnapshotRead.model_validate(s) for s in snapshots]
+    rentabilidade = [
+        RentabilidadePoint(date=p.date, carteira=p.carteira, benchmark=p.benchmark)
+        for p in benchmark_service.curva_rentabilidade(snapshots, taxas)
+    ]
+
+    if not curva:
+        return EvolutionResponse(
+            pontos=pontos,
+            rentabilidade=rentabilidade,
+            benchmark=None,
+            comparacao=None,
+            motivo=motivo,
+        )
+
+    final_bench = curva[-1].valor
+
+    # Os percentuais da comparacao vem da curva de RENTABILIDADE (TWR), nao da
+    # razao entre valores finais: com aportes, a segunda mede outra coisa.
+    ultimo = rentabilidade[-1]
+    carteira_pct = ultimo.carteira * 100
+    benchmark_pct = ultimo.benchmark * 100 if ultimo.benchmark is not None else None
+    excesso = do_indexador = None
+    if benchmark_pct is not None:
+        excesso = carteira_pct - benchmark_pct
+        # "X% do CDI" so faz sentido com o indexador rendendo: dividir por zero
+        # ou por numero negativo produziria um percentual sem significado.
+        if benchmark_pct > 0:
+            do_indexador = carteira_pct / benchmark_pct * 100
+
+    return EvolutionResponse(
+        pontos=pontos,
+        rentabilidade=rentabilidade,
+        benchmark=BenchmarkSerie(
+            indexador=indexador,
+            nome=benchmark_service.NOMES[indexador],
+            pontos=[BenchmarkPoint(date=p.date, valor=p.valor) for p in curva],
+            valor_final=final_bench,
+            variacao_percentual=benchmark_pct,
+        ),
+        comparacao=Comparacao(
+            carteira_percentual=carteira_pct,
+            benchmark_percentual=benchmark_pct,
+            excesso_pontos_percentuais=excesso,
+            percentual_do_indexador=do_indexador,
+        ),
+        motivo=None,
+    )
 
 
 @router.post(

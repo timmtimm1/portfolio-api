@@ -10,8 +10,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import get_provedor_de_cotacoes
+from app.clients import get_bcb_client, get_provedor_de_cotacoes
 from app.clients.base import ProvedorDeCotacoes
+from app.clients.bcb import BcbClient
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import decode_token
@@ -73,3 +74,5 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 # teste substituir o fornecedor por um duble e rodar sem tocar a rede. Suite que
 # depende de API externa e suite que falha quando a internet oscila.
 ProvedorDep = Annotated[ProvedorDeCotacoes, Depends(get_provedor_de_cotacoes)]
+
+BcbDep = Annotated[BcbClient, Depends(get_bcb_client)]

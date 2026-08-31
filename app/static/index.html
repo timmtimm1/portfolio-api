@@ -126,11 +126,23 @@
         <div class="cartao-cabeca">
           <div>
             <h2>Evolução da carteira</h2>
-            <p class="sub">Valor de mercado × custo, por pregão</p>
+            <p class="sub" id="sub-evolucao">Rentabilidade acumulada × CDI</p>
           </div>
-          <div class="legenda" id="legenda-evolucao"></div>
+          <div class="cabeca-acoes">
+            <span class="selo-comparacao" id="selo-cdi" hidden></span>
+            <div class="alternador" role="group" aria-label="Unidade do gráfico">
+              <button type="button" class="is-ativo" data-escala="pct">%</button>
+              <button type="button" data-escala="brl">R$</button>
+            </div>
+            <select id="indexador" class="seletor-mini" aria-label="Indexador de comparação">
+              <option value="cdi" selected>vs CDI</option>
+              <option value="selic">vs Selic</option>
+              <option value="">sem comparação</option>
+            </select>
+          </div>
         </div>
         <div class="tela-grafico"><canvas id="g-evolucao"></canvas></div>
+        <div class="legenda legenda-rodape" id="legenda-evolucao"></div>
       </article>
 
       <div class="grade-baixo">

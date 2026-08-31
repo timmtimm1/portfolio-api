@@ -115,6 +115,55 @@ Convenções, cada uma com um erro comum associado:
 `Decimal` para dinheiro, `float` para estatística — a fronteira é uma função com nome
 (`para_float`), não `float(x)` espalhado pelo código.
 
+## Comparação com CDI e Selic
+
+O gráfico de evolução traz a curva do indexador ao lado da carteira, com a resposta que
+todo investidor brasileiro quer: **bati o CDI?**
+
+A curva **não** é a taxa acumulada pura. É *"se eu tivesse posto o mesmo dinheiro, nos
+mesmos dias, no CDI, quanto teria hoje?"*:
+
+```
+equivalente[0] = custo[0]
+equivalente[t] = equivalente[t-1] × (1 + taxa_do_dia) + aporte[t]
+```
+
+A diferença importa quando há aportes: aplicar a taxa só sobre o valor inicial subestima
+o benchmark e faz a carteira parecer melhor do que foi. E o aporte entra **depois** de
+render — dinheiro que chegou hoje não estava aplicado ontem.
+
+### O gráfico é percentual, e usa TWR
+
+Em reais, uma carteira que cresceu esmaga a escala e o CDI vira uma linha reta sem
+informação. Em percentual, as duas curvas partem de 0% e a comparação fica legível.
+
+Mas o percentual **não** é `valor_mercado / custo − 1`. Esse número despenca a cada
+aporte, sem o mercado ter mexido:
+
+```
+dia 1: investe 1.000, vale 1.100          →  +10,0%
+dia 2: aporta 1.000, mercado parado
+       vale 2.100, custo 2.000            →   +5,0%   ← caiu pela metade!
+```
+
+Um gráfico assim mostraria quedas que nunca aconteceram, justamente nos dias em que a
+pessoa investiu mais. Usamos **retorno ponderado pelo tempo (TWR)**, que isola o efeito do
+mercado:
+
+```
+r[t] = (valor[t] − aporte[t]) / valor[t-1] − 1
+acumulado[t] = acumulado[t-1] × (1 + r[t])
+```
+
+No exemplo: `(2.100 − 1.000) / 1.100 − 1 = 0%`, e o acumulado segue +10%. É a medida que
+fundos reportam, e a única comparável com o CDI acumulado. O botão `R$` alterna para a
+escala em reais quando o que interessa é o patrimônio, não o desempenho.
+
+Fonte: [SGS do Banco Central](https://api.bcb.gov.br) (séries 12 e 11), oficial, pública e
+sem token. Taxa passada não muda, então é gravada uma vez e nunca mais buscada — sem TTL,
+só preenchimento de lacunas. Dia sem taxa publicada (fim de semana, feriado) não rende,
+que é o comportamento real do CDI.
+
 ## Otimização de Markowitz
 
 Implementada **na mão** com `scipy.optimize` (SLSQP), não com uma biblioteca de
