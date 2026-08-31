@@ -17,7 +17,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 5 | Catálogo de ativos da B3 e carga histórica | ✅ |
 | 6 | Livro de transações e cálculo de posição | ✅ |
 | 7 | Cotações (brapi/yfinance) com cache | ✅ |
-| 8 | Métricas: retorno, volatilidade, correlação | ⬜ |
+| 8 | Métricas: retorno, volatilidade, correlação | ✅ |
 | 9 | Otimização de Markowitz | ⬜ |
 | 10 | Snapshots diários da carteira | ⬜ |
 | 11 | Frontend com o gráfico da fronteira | ⬜ |
@@ -78,6 +78,39 @@ memória duplicaria as chamadas.
 
 Quando **nenhum** fornecedor responde, a carteira ainda é devolvida — com o cache vencido
 se houver, e os tickers afetados listados em `sem_cotacao`. Degradar é melhor que falhar.
+
+## Métricas de risco
+
+Retorno anualizado, volatilidade, Sharpe, maior queda e matriz de correlação, calculados
+sobre o histórico no banco. Resultado com dados reais (249 pregões):
+
+```
+ativo     ret. ano   volat.   Sharpe   maior queda
+VALE3       54.3%    25.6%     1.73        -20.2%
+PETR4       49.3%    25.3%     1.55        -22.2%
+ITUB4       17.2%    24.0%     0.30        -22.5%
+BBAS3       -3.2%    28.2%    -0.47        -34.8%
+```
+
+Convenções, cada uma com um erro comum associado:
+
+- **252 pregões por ano, não 365.** A B3 não negocia fim de semana nem feriado;
+  anualizar com 365 infla a volatilidade em ~20%. E a anualização usa a **raiz** de 252
+  — multiplicar por 252 infla o número em quase 16 vezes.
+- **Retorno geométrico, não média aritmética.** Cai 50%, sobe 50%: a média aritmética
+  diz 0%, o resultado real é −25%. A média mente sistematicamente para cima.
+- **Taxa livre de risco ≠ zero.** No Brasil é o CDI/Selic. Com o CDI a 10%, o BBAS3
+  acima tem Sharpe **negativo** — rendeu menos que o Tesouro Selic assumindo risco de
+  renda variável. Usar `rf=0`, como em exemplos americanos, o tornaria positivo.
+- **Correlação entre retornos, não entre preços.** Séries de preços de duas ações quase
+  sempre correlacionam alto porque ambas sobem com o mercado — correlação espúria.
+- **Séries alinhadas pela interseção das datas** antes de qualquer cálculo. Correlacionar
+  históricos de tamanhos diferentes produz um número com a forma certa e o significado
+  errado: nada estoura, nada avisa.
+- **Desvio-padrão amostral (`ddof=1`)**, que não subestima o risco.
+
+`Decimal` para dinheiro, `float` para estatística — a fronteira é uma função com nome
+(`para_float`), não `float(x)` espalhado pelo código.
 
 ## Decisões de segurança
 

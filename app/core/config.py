@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     # API cair por causa de um terceiro.
     HTTP_TIMEOUT_SECONDS: float = 5.0
 
+    # --- Metricas -------------------------------------------------------------
+    # Taxa livre de risco anual usada no indice de Sharpe. No Brasil isso e o
+    # CDI/Selic, NAO zero -- e a diferenca em relacao a maior parte do material
+    # estrangeiro. Com o CDI perto de dois digitos, uma acao que rendeu 8% no ano
+    # teve Sharpe negativo: entregou menos que o Tesouro Selic assumindo risco de
+    # renda variavel.
+    #
+    # Fica configuravel porque a Selic muda: ajuste no .env conforme o COPOM.
+    RISK_FREE_RATE: float = 0.10
+
     # Origens permitidas para CORS. Lista explicita, nunca "*" junto com credenciais.
     #
     # `NoDecode` desliga o parse automatico de JSON que o pydantic-settings faz em
