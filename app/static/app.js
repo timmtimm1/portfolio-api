@@ -106,13 +106,20 @@ function mostrarLogin() {
 }
 
 async function entrarNoApp() {
-  $("#login").hidden = true;
-  $("#app").hidden = false;
+  // Carrega os dados ANTES de trocar de tela.
+  //
+  // A ordem inversa deixa um estado quebrado quando algo falha: a tela de login
+  // já saiu, a aplicação aparece vazia, e a mensagem de erro é escrita num
+  // elemento que não está mais visível. O usuário fica olhando uma página em
+  // branco sem nenhuma explicação.
   const eu = await api("/auth/me");
   usuarioEmail = eu.email;
   $("#usuario-email").textContent = eu.email;
   $("#avatar").textContent = eu.email.slice(0, 2).toUpperCase();
   await carregarVisao();
+
+  $("#login").hidden = true;
+  $("#app").hidden = false;
 }
 
 $("#form-login").addEventListener("submit", async (ev) => {

@@ -29,6 +29,17 @@
 
 * { box-sizing: border-box; }
 
+/* O atributo `hidden` só aplica `display: none` pela folha de estilo do
+   NAVEGADOR -- e qualquer regra do autor com `display` tem precedência maior.
+   Como `.login-tela`, `.shell` e `.form-op` declaram `display: grid`, o
+   `hidden` não surtia efeito: a tela de login nunca sumia depois do login
+   bem-sucedido, e parecia que entrar não funcionava.
+
+   Esta regra restabelece o contrato de `hidden`. É `!important` de propósito:
+   ela precisa vencer qualquer `display` declarado adiante, inclusive os que
+   ainda não existem. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {

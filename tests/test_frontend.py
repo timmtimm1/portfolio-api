@@ -94,3 +94,32 @@ class TestPosturaDoCliente:
         assert "innerHTML" not in js
         assert "outerHTML" not in js
         assert "document.write" not in js
+
+
+class TestAtributoHidden:
+    """Regressão de um bug que quebrou o login inteiro.
+
+    O JavaScript alterna telas com `el.hidden = true/false`. Mas `hidden` só
+    aplica `display: none` pela folha de estilo do NAVEGADOR, e qualquer regra
+    do autor com `display` vence. Como `.login-tela`, `.shell` e `.form-op`
+    declaram `display: grid`, o `hidden` não surtia efeito nenhum: o login
+    funcionava (o servidor respondia 200 e os dados carregavam), mas a tela de
+    login continuava na frente -- e parecia que entrar não funcionava.
+    """
+
+    def test_css_restabelece_o_contrato_do_hidden(self) -> None:
+        css = (ESTATICOS / "style.css").read_text()
+        assert re.search(r"\[hidden\]\s*\{[^}]*display:\s*none\s*!important", css), (
+            "sem `[hidden] { display: none !important }`, qualquer regra com "
+            "`display` anula o atributo hidden e as telas não trocam"
+        )
+
+    def test_toda_classe_alternada_por_hidden_esta_coberta(self) -> None:
+        """Se alguém adicionar `display` a um elemento que o JS esconde, a regra
+        acima continua cobrindo -- este teste garante que a cobertura existe
+        ANTES de qualquer declaração de display."""
+        css = (ESTATICOS / "style.css").read_text()
+        pos_regra = css.find("[hidden]")
+        pos_primeiro_display = css.find("display:")
+        assert pos_regra != -1
+        assert pos_regra < pos_primeiro_display or "!important" in css[pos_regra : pos_regra + 80]
