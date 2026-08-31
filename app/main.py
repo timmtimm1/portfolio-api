@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ExceptionHandler
 
+from app.clients import fechar_http_client
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
 from app.core.middleware import SecurityHeadersMiddleware
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_settings()
     yield
     await dispose_engine()
+    await fechar_http_client()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

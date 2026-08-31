@@ -10,6 +10,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients import get_provedor_de_cotacoes
+from app.clients.base import ProvedorDeCotacoes
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import decode_token
@@ -65,3 +67,9 @@ async def get_current_user(
 # Alias usado nas assinaturas das rotas. Declarar `usuario: CurrentUser` e o que
 # torna uma rota protegida -- e o que torna obvio, na leitura, quais nao sao.
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+# Injetado como dependencia, nao importado direto na rota: e o que permite ao
+# teste substituir o fornecedor por um duble e rodar sem tocar a rede. Suite que
+# depende de API externa e suite que falha quando a internet oscila.
+ProvedorDep = Annotated[ProvedorDeCotacoes, Depends(get_provedor_de_cotacoes)]

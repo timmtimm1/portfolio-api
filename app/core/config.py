@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: str = "5/minute"
     RATE_LIMIT_REGISTER: str = "3/minute"
 
+    # --- Cotacoes -------------------------------------------------------------
+    # Token da brapi.dev. Opcional: sem ele o plano gratuito ainda responde para
+    # alguns tickers, com limite bem menor.
+    BRAPI_TOKEN: SecretStr | None = None
+
+    # Idade maxima de uma cotacao em cache, em segundos. 15 minutos e coerente
+    # com o atraso do proprio plano gratuito -- buscar mais rapido que isso
+    # gastaria cota para receber o mesmo numero.
+    QUOTE_TTL_SECONDS: int = 900
+
+    # Timeout de chamada externa. Sem teto, um fornecedor lento prende o worker
+    # indefinidamente e a aplicacao inteira para -- e a forma mais comum de uma
+    # API cair por causa de um terceiro.
+    HTTP_TIMEOUT_SECONDS: float = 5.0
+
     # Origens permitidas para CORS. Lista explicita, nunca "*" junto com credenciais.
     #
     # `NoDecode` desliga o parse automatico de JSON que o pydantic-settings faz em

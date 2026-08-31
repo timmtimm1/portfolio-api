@@ -7,11 +7,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.core.deps import CurrentUser, DbDep
+from app.core.deps import CurrentUser, DbDep, ProvedorDep, SettingsDep
 from app.models.transaction import TransactionSide
 from app.schemas.common import LIMITE_MAXIMO, LIMITE_PADRAO, Page
+from app.schemas.portfolio import PortfolioSummary
 from app.schemas.transaction import PositionRead, TransactionCreate, TransactionRead
-from app.services import transaction_service
+from app.services import portfolio_service, transaction_service
 from app.services.position import VendaSemPosicaoError
 from app.services.transaction_service import AtivoNaoEncontradoError
 
@@ -137,3 +138,27 @@ async def listar_posicoes(usuario: CurrentUser, db: DbDep) -> list[PositionRead]
         )
         for p in await transaction_service.posicoes(db, usuario.id)
     ]
+
+
+@router.get(
+    "/portfolio/summary",
+    response_model=PortfolioSummary,
+    summary="Carteira com valor de mercado e rentabilidade",
+)
+async def resumo_da_carteira(
+    usuario: CurrentUser, db: DbDep, provedor: ProvedorDep, settings: SettingsDep
+) -> PortfolioSummary:
+    """Posicao consolidada com cotacao atual, valor de mercado e resultado.
+
+    A cotacao vem do cache sempre que estiver dentro do TTL. Chamar a API externa
+    a cada request seria o erro classico: o endpoint passa a depender da
+    latencia e da disponibilidade de um terceiro, e a cota gratuita (15 mil
+    chamadas/mes) evapora com poucos usuarios.
+
+    Quando nenhum fornecedor responde, a carteira ainda e devolvida -- com custo
+    e quantidade, e os tickers afetados listados em `sem_cotacao`. Degradar e
+    melhor que falhar.
+    """
+    return await portfolio_service.resumo(
+        db, provedor, usuario.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )

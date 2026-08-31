@@ -16,7 +16,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 4 | Suíte de testes com Postgres efêmero + CI | ✅ |
 | 5 | Catálogo de ativos da B3 e carga histórica | ✅ |
 | 6 | Livro de transações e cálculo de posição | ✅ |
-| 7 | Cotações (brapi/yfinance) com cache | ⬜ |
+| 7 | Cotações (brapi/yfinance) com cache | ✅ |
 | 8 | Métricas: retorno, volatilidade, correlação | ⬜ |
 | 9 | Otimização de Markowitz | ⬜ |
 | 10 | Snapshots diários da carteira | ⬜ |
@@ -61,6 +61,24 @@ verdade — e quando elas divergissem, ninguém saberia qual está certa.
 ordem cronológica: uma venda com data antiga pode ser inválida mesmo com a posição de
 hoje sendo positiva. Conferir só o saldo atual deixaria esse caso passar.
 
+## Cotações
+
+brapi.dev como fonte primária, Yahoo Finance completando as lacunas, e **cache em
+tabela com TTL de 15 minutos**. Medido nesta máquina, com cotação real:
+
+| | tempo |
+|---|---|
+| cache vazio (chama o fornecedor) | 3.740 ms |
+| cache dentro do TTL | **8 ms** |
+
+Chamar a API externa a cada request faria o endpoint depender da latência e da
+disponibilidade de um terceiro — e a cota gratuita (15 mil chamadas/mês) evaporaria com
+poucos usuários. O cache vive no banco, não em memória: com vários workers, um cache em
+memória duplicaria as chamadas.
+
+Quando **nenhum** fornecedor responde, a carteira ainda é devolvida — com o cache vencido
+se houver, e os tickers afetados listados em `sem_cotacao`. Degradar é melhor que falhar.
+
 ## Decisões de segurança
 
 Cada uma está justificada na docstring do módulo correspondente.
@@ -91,6 +109,11 @@ Cada uma está justificada na docstring do módulo correspondente.
 - **CSP, HSTS, `X-Frame-Options`, `nosniff`, `Referrer-Policy`** em toda resposta.
 - **Toda consulta filtra por `user_id`**, num único ponto centralizado — e recurso de
   outro usuário devolve **404, não 403** (403 confirmaria que aquele id existe).
+- **Todo timeout configurado** nas chamadas externas (connect/read/write/pool). Sem
+  teto, um fornecedor que aceita a conexão e nunca responde prende o worker para sempre.
+- **Resposta externa lida defensivamente**: um campo que suma numa atualização do
+  fornecedor é ignorado, não vira 500 para o usuário. Preço zero ou negativo é rejeitado
+  como dado corrompido.
 - **`pip-audit` no CI**, semanalmente — a maior parte das falhas de uma aplicação não
   está no código dela, está no que ela importa.
 

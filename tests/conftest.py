@@ -42,6 +42,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
+from app.clients import get_provedor_de_cotacoes  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_db  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -100,8 +101,42 @@ async def db(engine: object) -> AsyncIterator[AsyncSession]:
         await conn.close()
 
 
+class ProvedorFake:
+    """Duble de fornecedor de cotacoes.
+
+    Nenhum teste toca a rede. Suite que depende de API externa falha quando a
+    internet oscila, quando a cota do mes acaba e quando o fornecedor muda o
+    formato -- e nenhuma dessas falhas diz nada sobre o SEU codigo.
+
+    `chamadas` registra cada lote pedido: e assim que se prova que o cache
+    realmente evitou a chamada, em vez de apenas presumir.
+    """
+
+    nome = "fake"
+
+    def __init__(self) -> None:
+        self.precos: dict[str, str] = {}
+        self.chamadas: list[list[str]] = []
+        self.falha = False
+
+    async def cotacoes(self, tickers):  # type: ignore[no-untyped-def]
+        from decimal import Decimal
+
+        from app.clients.base import Cotacao
+
+        self.chamadas.append(list(tickers))
+        if self.falha:
+            return {}
+        return {t: Cotacao(t, Decimal(self.precos[t]), "fake") for t in tickers if t in self.precos}
+
+
+@pytest.fixture
+def provedor() -> ProvedorFake:
+    return ProvedorFake()
+
+
 @pytest_asyncio.fixture
-async def client(db: AsyncSession) -> AsyncIterator[AsyncClient]:
+async def client(db: AsyncSession, provedor: ProvedorFake) -> AsyncIterator[AsyncClient]:
     """Cliente HTTP que fala com a aplicacao em memoria, sem porta de rede.
 
     `ASGITransport` chama a aplicacao direto. Nao ha servidor, nao ha socket, nao
@@ -113,6 +148,7 @@ async def client(db: AsyncSession) -> AsyncIterator[AsyncClient]:
     """
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_provedor_de_cotacoes] = lambda: provedor
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test/api/v1") as ac:
         yield ac
