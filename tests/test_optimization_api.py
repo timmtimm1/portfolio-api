@@ -202,3 +202,57 @@ class TestCasosDeBorda:
         assert (
             await client.post("/portfolio/optimize", json={"pontos": 5000}, headers=h)
         ).status_code == 422
+
+
+class TestMotivoDaRespostaVazia:
+    """Uma resposta 200 com listas vazias é ambígua.
+
+    O cliente não sabe se o cálculo não encontrou nada, se faltou dado ou se a
+    restrição era impossível — e acaba mostrando um gráfico em branco sem
+    explicação, que é o pior tipo de erro porque parece defeito do sistema.
+    Encontrado usando o frontend de verdade.
+    """
+
+    async def test_limite_impossivel_explica_e_sugere_o_ajuste(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
+
+        corpo = (
+            await client.post(
+                "/portfolio/optimize", json={"peso_maximo": 0.35, "pontos": 6}, headers=h
+            )
+        ).json()
+
+        assert corpo["fronteira"] == []
+        assert corpo["motivo"] is not None
+        assert "70%" in corpo["motivo"]  # o que a restrição de fato permite
+        assert "50%" in corpo["motivo"]  # o mínimo que resolveria
+
+    async def test_menos_de_dois_ativos_explica(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        h = await _carteira_com(client, db, "PETR4")
+        corpo = (await client.post("/portfolio/optimize", json={}, headers=h)).json()
+        assert "dois ativos" in corpo["motivo"]
+
+    async def test_sem_historico_explica(self, client: AsyncClient, db: AsyncSession) -> None:
+        _, h = await usuario_logado(client)
+        for t in ("PETR4", "VALE3"):
+            await criar_ativo(db, ticker=t)  # sem série de preços
+            await client.post("/transactions", json=op(ticker=t, quantity="10"), headers=h)
+
+        # peso_maximo=1.0 para NAO cair na checagem de restricao, que vem antes:
+        # com 2 ativos e o padrao de 40%, o motivo seria o limite, nao o historico.
+        corpo = (
+            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
+        ).json()
+        assert corpo["motivo"] is not None
+        assert "historico" in corpo["motivo"].lower()
+
+    async def test_sucesso_nao_traz_motivo(self, client: AsyncClient, db: AsyncSession) -> None:
+        """`motivo` só existe para explicar ausência de resultado."""
+        h = await _carteira_com(client, db, "PETR4", "VALE3", "ITUB4")
+        corpo = (await client.post("/portfolio/optimize", json={"pontos": 6}, headers=h)).json()
+        assert corpo["fronteira"] != []
+        assert corpo["motivo"] is None

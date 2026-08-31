@@ -12,6 +12,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 from starlette.types import ExceptionHandler
 
 from app.clients import fechar_http_client
@@ -20,6 +21,26 @@ from app.core.db import dispose_engine
 from app.core.middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import excesso_de_requisicoes, limiter
 from app.routers import assets, auth, health, metrics, snapshots, transactions
+
+
+class _EstaticosRevalidados(StaticFiles):
+    """StaticFiles que obriga o navegador a revalidar a cada visita.
+
+    Sem isso, o navegador serve o JS e o CSS do proprio cache sem sequer
+    perguntar ao servidor -- e uma correcao publicada nao chega ao usuario, que
+    continua vendo o comportamento antigo e reportando um bug que ja nao existe.
+    Foi exatamente o que aconteceu durante o desenvolvimento deste frontend.
+
+    `no-cache` NAO significa "nao guarde": significa "guarde, mas confirme antes
+    de usar". O navegador manda o ETag, o servidor responde 304 quando nada
+    mudou, e a resposta vazia custa alguns bytes. E o ajuste certo para arquivos
+    que mudam junto com a aplicacao e nao tem hash no nome.
+    """
+
+    def file_response(self, *args: object, **kwargs: object) -> Response:
+        resposta: Response = super().file_response(*args, **kwargs)  # type: ignore[arg-type]
+        resposta.headers["Cache-Control"] = "no-cache"
+        return resposta
 
 
 @asynccontextmanager
@@ -95,15 +116,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # `check_dir=False` evita quebrar o boot num ambiente onde a pasta nao foi
     # empacotada (um container mal montado sobe sem frontend, mas com a API viva).
     estaticos = Path(__file__).parent / "static"
-    app.mount(
-        "/app",
-        StaticFiles(directory=estaticos, html=True, check_dir=False),
-        name="frontend",
-    )
+    # Montado em dois caminhos.
+    #
+    # `/painel` e o oficial. `/app` fica como apelido porque navegadores que
+    # visitaram a versao antiga guardaram os arquivos em cache SEM revalidar --
+    # e um arquivo ja cacheado nao e afetado por um `Cache-Control` que so
+    # passou a ser enviado depois. Um caminho novo nao tem entrada no cache de
+    # ninguem, entao a busca e obrigatoriamente fresca.
+    for caminho in ("/painel", "/app"):
+        app.mount(
+            caminho,
+            _EstaticosRevalidados(directory=estaticos, html=True, check_dir=False),
+            name=f"frontend{caminho.replace('/', '_')}",
+        )
 
     @app.get("/", include_in_schema=False)
     async def raiz() -> RedirectResponse:
-        return RedirectResponse(url="/app/")
+        return RedirectResponse(url="/painel/")
 
     return app
 

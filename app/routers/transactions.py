@@ -12,7 +12,7 @@ from app.models.transaction import TransactionSide
 from app.schemas.common import LIMITE_MAXIMO, LIMITE_PADRAO, Page
 from app.schemas.portfolio import PortfolioSummary
 from app.schemas.transaction import PositionRead, TransactionCreate, TransactionRead
-from app.services import portfolio_service, transaction_service
+from app.services import portfolio_service, snapshot_service, transaction_service
 from app.services.position import VendaSemPosicaoError
 from app.services.transaction_service import AtivoNaoEncontradoError
 
@@ -54,6 +54,12 @@ async def criar_transacao(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from None
+
+    # O historico a partir da data da operacao passou a estar errado: ele foi
+    # calculado sem esta transacao. Refazer aqui mantem o grafico de evolucao
+    # coerente com o livro, em vez de "travado" no estado anterior.
+    await snapshot_service.reconstruir_desde(db, usuario.id, dados.traded_at)
+
     return TransactionRead.model_validate(transacao)
 
 
@@ -103,6 +109,11 @@ async def remover_transacao(usuario: CurrentUser, db: DbDep, transacao_id: uuid.
     Apagar uma compra antiga pode invalidar vendas posteriores que dependiam
     dela; nesse caso a remocao e recusada e o livro fica intacto.
     """
+    existente = await transaction_service.obter(db, usuario.id, transacao_id)
+    if existente is None:
+        raise _NAO_ENCONTRADA
+    dia = existente.traded_at
+
     try:
         removida = await transaction_service.remover(db, usuario.id, transacao_id)
     except VendaSemPosicaoError as exc:
@@ -112,6 +123,10 @@ async def remover_transacao(usuario: CurrentUser, db: DbDep, transacao_id: uuid.
         ) from None
     if not removida:
         raise _NAO_ENCONTRADA
+
+    # Sem isto, o grafico continuaria mostrando um patrimonio que nao
+    # corresponde a nenhuma operacao do livro.
+    await snapshot_service.reconstruir_desde(db, usuario.id, dia)
 
 
 @router.get(

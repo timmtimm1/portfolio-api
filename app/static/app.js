@@ -144,6 +144,14 @@ $("#form-login").addEventListener("submit", async (ev) => {
   }
 });
 
+$("#btn-ver-senha").addEventListener("click", () => {
+  const campo = $("#senha");
+  const visivel = campo.type === "text";
+  campo.type = visivel ? "password" : "text";
+  $("#btn-ver-senha").textContent = visivel ? "Mostrar" : "Ocultar";
+  campo.focus();
+});
+
 $("#btn-criar").addEventListener("click", async () => {
   const erro = $("#login-erro");
   erro.hidden = true;
@@ -441,13 +449,21 @@ function ponto(carteira, cor, rotulo) {
 
 function desenharFronteira(r) {
   const canvas = $("#g-fronteira");
+  const aviso = $("#fronteira-vazia");
   graficos.fronteira?.destroy();
 
   if (!r.fronteira.length) {
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Gráfico em branco sem explicação é o pior tipo de erro: parece defeito do
+    // sistema. A API diz o motivo; a tela mostra o motivo.
+    canvas.hidden = true;
+    aviso.textContent =
+      r.motivo || "Não há dados suficientes para calcular a fronteira.";
+    aviso.hidden = false;
     return;
   }
+
+  canvas.hidden = false;
+  aviso.hidden = true;
 
   const conjuntos = [
     {

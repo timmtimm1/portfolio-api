@@ -61,6 +61,15 @@ class OptimizationResponse(BaseModel):
 
     sem_historico_suficiente: list[str]
 
+    # Por que a fronteira veio vazia. Nulo quando ha resultado.
+    #
+    # Uma resposta 200 com listas vazias e ambigua: o cliente nao sabe se o
+    # calculo nao encontrou nada, se faltou dado ou se a restricao era
+    # impossivel -- e acaba mostrando um grafico em branco sem explicacao, que
+    # e o pior tipo de erro porque parece defeito do sistema. Dizer o motivo
+    # custa um campo e transforma "quebrou" em "faca isto".
+    motivo: str | None = None
+
     aviso: str = Field(
         default=(
             "Resultado baseado em retorno e covariancia estimados sobre o historico "

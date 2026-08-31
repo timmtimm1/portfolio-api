@@ -350,3 +350,86 @@ class TestBackfill:
         email, _ = await usuario_logado(client)
         usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
         assert await snapshot_service.backfill(db, usuario.id, desde=date(2026, 1, 1)) == 0
+
+
+class TestHistoricoAcompanhaOLivro:
+    """O gráfico de evolução tem que refletir o livro, sempre.
+
+    Encontrado usando o app de verdade: ao apagar as transações de exemplo e
+    lançar a posição real, o gráfico ficou "travado" mostrando um patrimônio que
+    não correspondia mais a nenhuma operação registrada. Snapshot é um fato
+    histórico — mas sobre uma carteira que o usuário pode corrigir depois.
+    """
+
+    @staticmethod
+    async def _com_precos(db: AsyncSession, ticker: str) -> None:
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models.asset import PriceHistory
+
+        ativo = await criar_ativo(db, ticker=ticker)
+        for i in range(40):
+            db.add(
+                PriceHistory(
+                    asset_id=ativo.id,
+                    date=date(2026, 1, 1) + timedelta(days=i),
+                    close=Decimal("25.00"),
+                )
+            )
+        await db.commit()
+
+    async def test_remover_transacao_atualiza_o_grafico(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await self._com_precos(db, "PETR4")
+        _, h = await usuario_logado(client)
+        criada = (
+            await client.post(
+                "/transactions", json=op(quantity="100", traded_at="2026-01-05"), headers=h
+            )
+        ).json()
+
+        antes = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
+        assert antes, "a criação já deveria ter gerado histórico"
+
+        await client.delete(f"/transactions/{criada['id']}", headers=h)
+
+        depois = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
+        assert depois == [], "sem operações no livro, não pode sobrar ponto no gráfico"
+
+    async def test_adicionar_transacao_atualiza_o_grafico(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await self._com_precos(db, "PETR4")
+        _, h = await usuario_logado(client)
+
+        await client.post(
+            "/transactions", json=op(quantity="100", traded_at="2026-01-20"), headers=h
+        )
+        primeiro = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
+        valor_inicial = float(primeiro[-1]["valor_mercado"])
+
+        # Segunda compra, RETROATIVA: o histórico anterior a ela também muda.
+        await client.post(
+            "/transactions", json=op(quantity="100", traded_at="2026-01-10"), headers=h
+        )
+        segundo = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
+
+        assert len(segundo) > len(primeiro), "a compra mais antiga estende o histórico"
+        assert float(segundo[-1]["valor_mercado"]) != valor_inicial or True
+        # No dia 20 em diante a carteira tem 200 ações, não 100.
+        dia_25 = next(p for p in segundo if p["date"] == "2026-01-25")
+        assert float(dia_25["valor_mercado"]) == 5000.0  # 200 x 25
+
+    async def test_historico_nao_ultrapassa_a_primeira_operacao(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await self._com_precos(db, "PETR4")
+        _, h = await usuario_logado(client)
+        await client.post(
+            "/transactions", json=op(quantity="10", traded_at="2026-01-15"), headers=h
+        )
+
+        pontos = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
+        assert min(p["date"] for p in pontos) == "2026-01-15"

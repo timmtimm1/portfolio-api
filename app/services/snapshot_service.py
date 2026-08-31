@@ -7,8 +7,9 @@ import uuid
 from datetime import UTC, datetime
 from datetime import date as date_type
 from decimal import Decimal
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -258,3 +259,44 @@ async def backfill(
     if linhas:
         await _gravar(db, linhas)
     return len(linhas)
+
+
+async def reconstruir_desde(db: AsyncSession, user_id: uuid.UUID, dia: date_type) -> int:
+    """Invalida e refaz o historico a partir de um dia.
+
+    ## Por que isso precisa existir
+
+    Snapshot e um fato historico -- mas um fato historico sobre uma carteira que
+    o usuario pode corrigir depois. Se ele apaga uma compra lancada por engano,
+    ou registra uma operacao antiga que tinha esquecido, todos os snapshots
+    daquele dia em diante passam a descrever uma carteira que nunca existiu.
+
+    Aconteceu de verdade: apagar as transacoes de exemplo deixou o grafico de
+    evolucao "travado" mostrando um patrimonio que nao correspondia mais a
+    nenhuma operacao no livro. O grafico mentia, e nada no sistema percebia.
+
+    Apagamos em vez de recalcular em cima: se a carteira ficou vazia num periodo,
+    o certo e nao haver ponto nenhum, e um UPDATE nunca removeria linhas.
+    """
+    # `CursorResult` expoe rowcount; o `Result` generico do stub nao. O cast
+    # documenta que um DELETE sempre devolve o primeiro.
+    resultado = cast(
+        CursorResult[Any],
+        await db.execute(
+            delete(PortfolioSnapshot).where(
+                PortfolioSnapshot.user_id == user_id, PortfolioSnapshot.date >= dia
+            )
+        ),
+    )
+    apagados = resultado.rowcount or 0
+    await db.commit()
+
+    refeitos = await backfill(db, user_id, desde=dia)
+    logger.info(
+        "[snapshots] historico refeito para %s desde %s: %d apagados, %d recriados",
+        user_id,
+        dia,
+        apagados,
+        refeitos,
+    )
+    return refeitos

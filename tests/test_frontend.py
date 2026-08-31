@@ -10,6 +10,21 @@ from httpx import AsyncClient
 ESTATICOS = Path(__file__).parent.parent / "app" / "static"
 
 
+def _mesma_origem(url: str) -> bool:
+    """Caminho relativo ou absoluto no proprio host.
+
+    Os links viraram RELATIVOS ("app.js" em vez de "/app/app.js") para a pagina
+    funcionar tanto em /painel/ quanto em /app/. Relativo tambem e mesma origem,
+    entao a intencao do teste -- nenhuma origem externa nao autorizada -- segue
+    valendo; so a forma de escrever o caminho mudou.
+    """
+    return not url.startswith(("http://", "https://", "//"))
+
+
+def _mesma_origem_ou_cdn(url: str) -> bool:
+    return _mesma_origem(url) or url.startswith("https://cdn.jsdelivr.net/")
+
+
 def _sem_comentarios(js: str) -> str:
     """Remove comentarios antes de procurar padroes proibidos.
 
@@ -25,19 +40,38 @@ def _sem_comentarios(js: str) -> str:
 
 
 class TestServico:
-    async def test_raiz_redireciona_para_o_app(self, client: AsyncClient) -> None:
+    async def test_raiz_redireciona_para_o_painel(self, client: AsyncClient) -> None:
         resp = await client.get("http://test/", follow_redirects=False)
         assert resp.status_code in (307, 308)
-        assert resp.headers["location"] == "/app/"
+        assert resp.headers["location"] == "/painel/"
 
-    async def test_pagina_e_servida(self, client: AsyncClient) -> None:
-        resp = await client.get("http://test/app/")
-        assert resp.status_code == 200
-        assert "Portfolio Tracker" in resp.text
+    async def test_pagina_e_servida_nos_dois_caminhos(self, client: AsyncClient) -> None:
+        """`/app` continua valendo como apelido.
+
+        O caminho mudou para `/painel` porque navegadores que visitaram a versao
+        antiga guardaram os arquivos em cache sem revalidar -- e um arquivo ja
+        cacheado nao e afetado por um Cache-Control que so passou a ser enviado
+        depois. Quebrar o endereco antigo, porem, seria trocar um problema por
+        outro.
+        """
+        for base in ("/painel/", "/app/"):
+            resp = await client.get(f"http://test{base}")
+            assert resp.status_code == 200, base
+            assert "Portfolio Tracker" in resp.text
 
     async def test_css_e_js_sao_servidos(self, client: AsyncClient) -> None:
-        assert (await client.get("http://test/app/style.css")).status_code == 200
-        assert (await client.get("http://test/app/app.js")).status_code == 200
+        for base in ("/painel", "/app"):
+            assert (await client.get(f"http://test{base}/style.css")).status_code == 200
+            assert (await client.get(f"http://test{base}/app.js")).status_code == 200
+
+    async def test_estaticos_pedem_revalidacao(self, client: AsyncClient) -> None:
+        """`no-cache` nao e "nao guarde", e sim "guarde, mas confirme antes de
+        usar". Sem isso, uma correcao publicada nao chega ao usuario -- ele
+        continua vendo o comportamento antigo e reportando um bug que ja nao
+        existe. Aconteceu de verdade durante o desenvolvimento."""
+        for caminho in ("/painel/app.js", "/painel/style.css"):
+            resp = await client.get(f"http://test{caminho}")
+            assert resp.headers.get("cache-control") == "no-cache", caminho
 
     async def test_cabecalhos_de_seguranca_valem_para_o_frontend(self, client: AsyncClient) -> None:
         """O middleware cobre os estaticos tambem -- e no frontend que CSP e
@@ -66,14 +100,14 @@ class TestCompatibilidadeComACSP:
         sem erro visivel e simplesmente nao executa."""
         html = (ESTATICOS / "index.html").read_text()
         for src in re.findall(r'<script[^>]*\bsrc="([^"]+)"', html):
-            assert src.startswith("/") or src.startswith("https://cdn.jsdelivr.net/"), src
+            assert _mesma_origem_ou_cdn(src), src
 
     def test_sem_folha_de_estilo_externa(self) -> None:
         """A CSP nao libera fonts.googleapis: uma fonte externa falharia em
         silencio e a pagina cairia na fonte de sistema sem aviso."""
         html = (ESTATICOS / "index.html").read_text()
         for href in re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"', html):
-            assert href.startswith("/"), href
+            assert _mesma_origem(href), href
 
 
 class TestPosturaDoCliente:

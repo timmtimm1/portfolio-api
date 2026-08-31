@@ -80,29 +80,49 @@ async def otimizar(
         else sorted(p.ticker for p in abertas)
     )
 
-    vazio = OptimizationResponse(
-        inicio=None,
-        fim=None,
-        pregoes=0,
-        taxa_livre_risco=taxa_livre_risco,
-        peso_maximo=pedido.peso_maximo,
-        tickers=[],
-        fronteira=[],
-        minima_variancia=None,
-        maximo_sharpe=None,
-        carteira_atual=None,
-        sem_historico_suficiente=pedidos,
-    )
+    def vazio(motivo: str) -> OptimizationResponse:
+        return OptimizationResponse(
+            inicio=None,
+            fim=None,
+            pregoes=0,
+            taxa_livre_risco=taxa_livre_risco,
+            peso_maximo=pedido.peso_maximo,
+            tickers=[],
+            fronteira=[],
+            minima_variancia=None,
+            maximo_sharpe=None,
+            carteira_atual=None,
+            sem_historico_suficiente=pedidos,
+            motivo=motivo,
+        )
+
     if len(pedidos) < MINIMO_ATIVOS:
-        return vazio
+        return vazio(
+            "A otimizacao precisa de pelo menos dois ativos. Com um so, a resposta "
+            "seria '100% nele' -- correta e inutil."
+        )
+
+    # Verificacao antecipada da restricao, para explicar em vez de so falhar.
+    # N ativos com teto de p cada somam no maximo N x p; se isso for menor que
+    # 100%, nao existe carteira valida.
+    if len(pedidos) * pedido.peso_maximo < 1.0 - 1e-9:
+        minimo = 1.0 / len(pedidos)
+        return vazio(
+            f"{len(pedidos)} ativos com limite de {pedido.peso_maximo:.0%} cada somam "
+            f"no maximo {len(pedidos) * pedido.peso_maximo:.0%} -- impossivel investir "
+            f"100%. Aumente o limite para pelo menos {minimo:.0%} ou inclua mais ativos."
+        )
 
     series = await series_service.carregar_series(db, pedidos, desde=pedido.desde, ate=pedido.ate)
     if series is None or len(series) <= MINIMO_OBSERVACOES:
-        return vazio
+        return vazio(
+            "Nao ha historico de precos suficiente em comum entre estes ativos. "
+            f"Sao necessarios mais de {MINIMO_OBSERVACOES} pregoes com todos negociando."
+        )
 
     aptos = [t for t in series.tickers if len(series.precos[t]) > MINIMO_OBSERVACOES]
     if len(aptos) < MINIMO_ATIVOS:
-        return vazio
+        return vazio("Menos de dois ativos tem historico suficiente para entrar no calculo.")
 
     # `subconjunto` preserva o alinhamento -- remontar o dicionario a mao seria a
     # brecha por onde series desalinhadas voltariam a virar covariancia errada.
@@ -120,10 +140,11 @@ async def otimizar(
         fronteira = fronteira_eficiente(
             mu, cov, taxa_livre_risco, pontos=pedido.pontos, peso_maximo=pedido.peso_maximo
         )
-    except OtimizacaoInviavelError:
-        # Acontece de verdade: 2 ativos com limite de 40% somam no maximo 80%.
-        # A restricao e do usuario, entao a resposta e vazia e explicita, nao 500.
-        return vazio
+    except OtimizacaoInviavelError as exc:
+        # Rede de seguranca: a checagem antecipada acima cobre o caso previsivel,
+        # mas o solver pode nao convergir por outros motivos. A restricao veio do
+        # usuario, entao a resposta e vazia e explicita, nunca um 500.
+        return vazio(f"Nao foi possivel otimizar com estas restricoes. {exc}")
 
     atual = None
     if da_carteira:

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portfolio Tracker</title>
-<link rel="stylesheet" href="/app/style.css">
+<link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237b5cff'/><path d='M9 21V15M16 21V11M23 21V17' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
 </head>
 <body>
@@ -24,7 +24,10 @@
     </label>
     <label class="campo">
       <span>Senha</span>
-      <input type="password" id="senha" name="password" required autocomplete="current-password" placeholder="••••••••••••">
+      <div class="campo-senha">
+        <input type="password" id="senha" name="password" required autocomplete="current-password" placeholder="••••••••••••">
+        <button type="button" id="btn-ver-senha" aria-label="Mostrar senha">Mostrar</button>
+      </div>
     </label>
 
     <p class="erro" id="login-erro" role="alert" hidden></p>
@@ -202,7 +205,10 @@
             <span class="lg"><i style="background:#f5b54a"></i>Sua carteira</span>
           </div>
         </div>
-        <div class="tela-grafico"><canvas id="g-fronteira"></canvas></div>
+        <div class="tela-grafico">
+          <canvas id="g-fronteira"></canvas>
+          <p class="vazio-explicado" id="fronteira-vazia" hidden></p>
+        </div>
       </article>
 
       <div class="grade-carteiras" id="carteiras-sugeridas"></div>
@@ -248,6 +254,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script src="/app/app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
