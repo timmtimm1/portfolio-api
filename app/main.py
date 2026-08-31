@@ -10,7 +10,6 @@ from typing import cast
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ExceptionHandler
@@ -19,7 +18,7 @@ from app.clients import fechar_http_client
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
 from app.core.middleware import SecurityHeadersMiddleware
-from app.core.rate_limit import limiter
+from app.core.rate_limit import excesso_de_requisicoes, limiter
 from app.routers import assets, auth, health, metrics, snapshots, transactions
 
 
@@ -59,12 +58,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Rate limiting: o limiter fica no state porque os decoradores das rotas
     # o buscam ali. O handler traduz o estouro em 429 com Retry-After.
     app.state.limiter = limiter
-    # O handler do slowapi e tipado para RateLimitExceeded, mas o Starlette
-    # declara o parametro como Exception. O cast documenta que a incompatibilidade
-    # e so de assinatura -- o Starlette so chama este handler para essa excecao.
-    app.add_exception_handler(
-        RateLimitExceeded, cast(ExceptionHandler, _rate_limit_exceeded_handler)
-    )
+    # Handler proprio em vez do padrao do slowapi: o dele nao inclui
+    # `Retry-After`, e sem esse cabecalho o cliente so pode chutar quanto
+    # esperar -- normalmente tentando cedo demais e prolongando o bloqueio.
+    app.add_exception_handler(RateLimitExceeded, cast(ExceptionHandler, excesso_de_requisicoes))
 
     app.add_middleware(SecurityHeadersMiddleware)
 

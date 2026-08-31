@@ -124,7 +124,7 @@ async def login(
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Renova o access token")
-@limiter.limit(get_settings().RATE_LIMIT_LOGIN)
+@limiter.limit(get_settings().RATE_LIMIT_REFRESH)
 async def refresh(
     request: Request,
     response: Response,

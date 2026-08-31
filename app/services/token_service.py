@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -10,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.security import create_token, generate_refresh_token, hash_refresh_token
-from app.models.refresh_token import RefreshToken
+from app.models.refresh_token import MotivoRevogacao, RefreshToken
 from app.models.user import User
 from app.services.exceptions import DomainError
+
+logger = logging.getLogger(__name__)
 
 
 class RefreshTokenInvalidoError(DomainError):
@@ -73,8 +76,23 @@ async def rotacionar(
         raise RefreshTokenInvalidoError
 
     if registro.revoked_at is not None:
-        await revogar_todos_do_usuario(db, registro.user_id)
-        raise ReusoDeTokenDetectadoError(str(registro.user_id))
+        # Corrida (duas abas, nova tentativa apos falha de rede) ou roubo?
+        # A janela de tolerancia separa os dois: uma corrida acontece em
+        # milissegundos, um token roubado e usado muito depois.
+        idade = (datetime.now(UTC) - registro.revoked_at).total_seconds()
+        # A tolerancia vale SO para revogacao por rotacao. Aplicar a logout faria
+        # o token continuar valendo dez segundos depois de sair -- e um logout que
+        # nao desloga na hora nao e logout.
+        rotacionado = registro.revoked_reason is MotivoRevogacao.ROTACAO
+        if not rotacionado or idade > settings.REFRESH_REUSE_GRACE_SECONDS:
+            await revogar_todos_do_usuario(db, registro.user_id)
+            raise ReusoDeTokenDetectadoError(str(registro.user_id))
+        logger.info(
+            "[tokens] reapresentacao dentro da janela de tolerancia (%.1fs) "
+            "para o usuario %s -- tratado como corrida, nao como roubo",
+            idade,
+            registro.user_id,
+        )
 
     # `expires_at` vem do banco com timezone; comparamos sempre em UTC ciente.
     # Comparar datetime naive com aware estoura TypeError -- em producao, as 3h.
@@ -86,6 +104,7 @@ async def rotacionar(
         raise RefreshTokenInvalidoError
 
     registro.revoked_at = datetime.now(UTC)
+    registro.revoked_reason = MotivoRevogacao.ROTACAO
     # Sem commit aqui: `emitir_par` fecha a transacao. Revogar o antigo e emitir o
     # novo precisam ser atomicos -- uma falha no meio deixaria o usuario sem
     # nenhum token valido, deslogado sem ter feito nada.
@@ -105,7 +124,7 @@ async def revogar(db: AsyncSession, refresh_bruto: str) -> None:
             RefreshToken.token_hash == hash_refresh_token(refresh_bruto),
             RefreshToken.revoked_at.is_(None),
         )
-        .values(revoked_at=datetime.now(UTC))
+        .values(revoked_at=datetime.now(UTC), revoked_reason=MotivoRevogacao.LOGOUT)
     )
     await db.commit()
 
@@ -117,6 +136,6 @@ async def revogar_todos_do_usuario(db: AsyncSession, user_id: uuid.UUID) -> None
     await db.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(UTC))
+        .values(revoked_at=datetime.now(UTC), revoked_reason=MotivoRevogacao.SEGURANCA)
     )
     await db.commit()

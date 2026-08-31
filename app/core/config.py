@@ -59,11 +59,38 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Janela de tolerancia para reapresentacao de um refresh token ja rotacionado.
+    #
+    # Sem ela, a deteccao de reuso e RIGIDA DEMAIS para o mundo real: abrir a
+    # aplicacao em duas abas ao mesmo tempo faz as duas chamarem /auth/refresh
+    # com o mesmo cookie; a segunda apresenta um token que a primeira acabou de
+    # rotacionar, e o sistema derruba todas as sessoes do usuario. O mesmo ocorre
+    # com nova tentativa apos uma oscilacao de rede.
+    #
+    # Alguns segundos distinguem os dois casos: uma corrida acontece em
+    # milissegundos; um token roubado e usado horas ou dias depois. E a mesma
+    # solucao adotada por implementacoes maduras de OAuth (o "reuse interval").
+    #
+    # O custo e explicito: um atacante que replicar o token DENTRO dessa janela
+    # passa despercebido. Dez segundos e a troca aceita -- o alternativo, que e
+    # deslogar o usuario por abrir duas abas, faz qualquer equipe simplesmente
+    # desligar a deteccao de reuso, e ai nao ha protecao nenhuma.
+    REFRESH_REUSE_GRACE_SECONDS: int = 10
+
     # Onde o contador de rate limit e guardado. "memory://" e por processo;
     # em producao com mais de um worker, use "redis://host:6379".
     RATE_LIMIT_STORAGE: str = "memory://"
     RATE_LIMIT_LOGIN: str = "5/minute"
     RATE_LIMIT_REGISTER: str = "3/minute"
+    # Renovacao tem limite proprio, mais folgado que o do login. Dois motivos:
+    #
+    # 1. Ela e AUTOMATICA -- o frontend a chama a cada carregamento de pagina e
+    #    a cada token expirado. Compartilhar o balde do login faria seis F5 num
+    #    minuto bloquearem o proprio usuario.
+    # 2. O alvo e diferente. Forca bruta em senha humana e viavel; em um
+    #    refresh token de 384 bits aleatorios, nao e. O limite aqui existe
+    #    contra abuso de recurso, nao contra adivinhacao.
+    RATE_LIMIT_REFRESH: str = "30/minute"
 
     # --- Cotacoes -------------------------------------------------------------
     # Token da brapi.dev. Opcional: sem ele o plano gratuito ainda responde para

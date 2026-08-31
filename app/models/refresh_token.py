@@ -17,13 +17,35 @@ verdade e esta tabela.
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class MotivoRevogacao(enum.StrEnum):
+    """Por que o token foi revogado.
+
+    Nao e metadado decorativo: e o que decide se uma reapresentacao merece a
+    janela de tolerancia.
+
+    ROTACAO  -- o proprio usuario renovou. Reapresentar logo em seguida quase
+                sempre e corrida entre abas, nao roubo. Ganha tolerancia.
+    LOGOUT   -- o usuario saiu. Nenhuma tolerancia: se o token voltasse a
+                funcionar por dez segundos depois do logout, o logout seria
+                mentira. Foi exatamente isso que um teste pegou quando a janela
+                de tolerancia foi aplicada a todos os casos.
+    SEGURANCA -- derrubado por deteccao de reuso. Tolerar aqui anularia a
+                defesa que acabou de disparar.
+    """
+
+    ROTACAO = "rotacao"
+    LOGOUT = "logout"
+    SEGURANCA = "seguranca"
 
 
 class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -55,6 +77,10 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # permite detectar reuso -- se o registro sumisse, um token roubado seria
     # apenas "desconhecido", indistinguivel de lixo, e o roubo passaria batido.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_reason: Mapped[MotivoRevogacao | None] = mapped_column(
+        Enum(MotivoRevogacao, native_enum=False, length=12, validate_strings=True),
+        default=None,
+    )
 
     def __repr__(self) -> str:
         # Sem o hash: repr de model vaza em log com frequencia surpreendente.

@@ -24,6 +24,8 @@ efeito colateral.
 
 from __future__ import annotations
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -49,3 +51,33 @@ limiter = Limiter(
     # esbarraria no limite e falharia por motivo errado.
     enabled=get_settings().ENVIRONMENT != "test",
 )
+
+
+def _segundos_da_janela(descricao: str) -> int:
+    """Extrai a janela do limite ("5/minute" -> 60) para o cabecalho Retry-After.
+
+    Nao e o tempo exato ate liberar (isso exigiria consultar o balde), e sim o
+    teto da janela -- que e um valor seguro: o cliente nunca tenta cedo demais.
+    """
+    unidades = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+    for nome, segundos in unidades.items():
+        if nome in descricao:
+            return segundos
+    return 60
+
+
+async def excesso_de_requisicoes(request: Request, exc: Exception) -> JSONResponse:
+    """Resposta do 429, com `Retry-After`.
+
+    O handler padrao do slowapi nao inclui esse cabecalho, e sem ele o cliente
+    so pode chutar quanto esperar -- normalmente tentando cedo demais e
+    prolongando o proprio bloqueio. O RFC 6585 define o 429 justamente com esse
+    cabecalho; omiti-lo transforma um limite util num limite hostil.
+    """
+    limite = getattr(exc, "detail", "") or ""
+    segundos = _segundos_da_janela(str(limite))
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Muitas requisicoes. Tente de novo em {segundos}s."},
+        headers={"Retry-After": str(segundos)},
+    )

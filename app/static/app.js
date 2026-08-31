@@ -51,6 +51,27 @@ async function api(caminho, opcoes = {}, jaRenovou = false) {
   return r.status === 204 ? null : r.json();
 }
 
+async function mensagemDeFalha(r) {
+  // Traduz a resposta do servidor em mensagem honesta.
+  //
+  // A primeira versao mostrava "E-mail ou senha incorretos" para QUALQUER falha.
+  // Resultado: quando o rate limit da Etapa 3 respondeu 429, a tela acusou senha
+  // errada -- e o usuario ficou tentando de novo, gastando mais tentativas e
+  // prolongando o bloqueio. Mensagem de erro que mente e pior que mensagem
+  // generica: ela manda a pessoa para o lado errado.
+  //
+  // O 401 continua generico DE PROPOSITO (nao distingue email inexistente de
+  // senha errada, para nao virar oraculo de quem tem conta). Ja o 429 nao e
+  // segredo nenhum -- esconde-lo so prejudica quem esta do lado certo.
+  if (r.status === 429) {
+    const segundos = Number(r.headers.get("Retry-After")) || 60;
+    return `Muitas tentativas de login. Aguarde ${segundos}s e tente de novo.`;
+  }
+  if (r.status === 401) return "E-mail ou senha incorretos";
+  const corpo = await r.json().catch(() => ({}));
+  return detalhe(corpo) || `Não foi possível entrar (erro ${r.status})`;
+}
+
 function detalhe(corpo) {
   const d = corpo?.detail;
   if (typeof d === "string") return d;
@@ -104,7 +125,7 @@ $("#form-login").addEventListener("submit", async (ev) => {
   try {
     const corpo = new URLSearchParams({ username: $("#email").value, password: $("#senha").value });
     const r = await fetch(`${API}/auth/login`, { method: "POST", body: corpo });
-    if (!r.ok) throw new Error("E-mail ou senha incorretos");
+    if (!r.ok) throw new Error(await mensagemDeFalha(r));
     token = (await r.json()).access_token;
     await entrarNoApp();
   } catch (e) {
@@ -125,8 +146,10 @@ $("#btn-criar").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: $("#email").value, password: $("#senha").value }),
     });
-    const corpo = await r.json();
-    if (!r.ok) throw new Error(detalhe(corpo) || "Não foi possível criar a conta");
+    if (!r.ok) {
+      if (r.status === 409) throw new Error("Este e-mail já tem conta. Basta entrar.");
+      throw new Error(await mensagemDeFalha(r));
+    }
     $("#form-login").requestSubmit();
   } catch (e) {
     erro.textContent = e.message;

@@ -13,6 +13,22 @@ from app.models.refresh_token import RefreshToken
 from tests.factories import criar_usuario, login, usuario_logado
 
 
+async def _envelhecer_revogacoes(db: AsyncSession, *, segundos: int) -> None:
+    """Recua o `revoked_at` das linhas revogadas, simulando tempo passado.
+
+    Permite testar a deteccao de roubo sem `sleep` na suite: teste que dorme e
+    teste que ninguem roda.
+    """
+    from sqlalchemy import update
+
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.revoked_at.is_not(None))
+        .values(revoked_at=datetime.now(UTC) - timedelta(seconds=segundos))
+    )
+    await db.commit()
+
+
 class TestRotaProtegida:
     async def test_sem_token_e_recusado(self, client: AsyncClient) -> None:
         assert (await client.get("/auth/me")).status_code == 401
@@ -84,15 +100,44 @@ class TestRotacao:
     async def test_refresh_sem_cookie_e_recusado(self, client: AsyncClient) -> None:
         assert (await client.post("/auth/refresh")).status_code == 401
 
-    async def test_token_antigo_nao_funciona_apos_rotacao(self, client: AsyncClient) -> None:
+    async def test_token_antigo_nao_funciona_apos_rotacao(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
         email, senha = await criar_usuario(client)
         await login(client, email, senha)
         antigo = client.cookies["refresh_token"]
         await client.post("/auth/refresh")
+        await _envelhecer_revogacoes(db, segundos=120)
 
         client.cookies.set("refresh_token", antigo, path="/api/v1/auth")
         resp = await client.post("/auth/refresh")
         assert resp.status_code == 401
+
+    async def test_duas_abas_abrindo_juntas_nao_derrubam_a_sessao(
+        self, client: AsyncClient
+    ) -> None:
+        """Regressao de um problema encontrado usando o frontend de verdade.
+
+        Duas abas abrindo ao mesmo tempo chamam /auth/refresh com o MESMO cookie.
+        A segunda apresenta o token que a primeira acabou de rotacionar -- e sem
+        a janela de tolerancia isso era interpretado como roubo, derrubando todas
+        as sessoes. O usuario era deslogado por abrir duas abas.
+        """
+        email, senha = await criar_usuario(client)
+        await login(client, email, senha)
+        compartilhado = client.cookies["refresh_token"]
+
+        # Aba 1 renova.
+        assert (await client.post("/auth/refresh")).status_code == 200
+        depois_da_aba1 = client.cookies["refresh_token"]
+
+        # Aba 2 chega com o cookie antigo, milissegundos depois.
+        client.cookies.set("refresh_token", compartilhado, path="/api/v1/auth")
+        assert (await client.post("/auth/refresh")).status_code == 200
+
+        # E a sessao da aba 1 continua viva.
+        client.cookies.set("refresh_token", depois_da_aba1, path="/api/v1/auth")
+        assert (await client.post("/auth/refresh")).status_code == 200
 
     async def test_reuso_derruba_todas_as_sessoes(
         self, client: AsyncClient, db: AsyncSession
@@ -110,6 +155,11 @@ class TestRotacao:
 
         await client.post("/auth/refresh")  # usuario renova; `roubado` e revogado
         atual = client.cookies["refresh_token"]
+
+        # Envelhece a revogacao para alem da janela de tolerancia: sem isso, a
+        # reapresentacao imediata seria tratada como corrida entre abas, nao
+        # como roubo. Um token realmente roubado e usado muito depois.
+        await _envelhecer_revogacoes(db, segundos=120)
 
         # O atacante usa a copia.
         client.cookies.set("refresh_token", roubado, path="/api/v1/auth")
@@ -171,3 +221,55 @@ class TestLogout:
 
     async def test_logout_sem_sessao_nao_falha(self, client: AsyncClient) -> None:
         assert (await client.post("/auth/logout")).status_code == 204
+
+
+class TestJanelaDeTolerancia:
+    """A tolerância vale só para revogação por ROTAÇÃO.
+
+    Estes testes existem porque a primeira versão aplicava a janela a qualquer
+    revogação -- e um teste flagrou que, com isso, o token voltava a funcionar
+    por dez segundos DEPOIS do logout. Logout que não desloga na hora não é
+    logout.
+    """
+
+    async def test_logout_nao_ganha_tolerancia(self, client: AsyncClient) -> None:
+        email, senha = await criar_usuario(client)
+        await login(client, email, senha)
+        token = client.cookies["refresh_token"]
+
+        await client.post("/auth/logout")
+
+        # Imediatamente após o logout — dentro da janela, se ela valesse aqui.
+        client.cookies.set("refresh_token", token, path="/api/v1/auth")
+        assert (await client.post("/auth/refresh")).status_code == 401
+
+    async def test_revogacao_por_seguranca_nao_ganha_tolerancia(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Tolerar aqui anularia a defesa que acabou de disparar."""
+        from app.models.user import User
+        from app.services.token_service import revogar_todos_do_usuario
+
+        email, senha = await criar_usuario(client)
+        await login(client, email, senha)
+        token = client.cookies["refresh_token"]
+
+        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        await revogar_todos_do_usuario(db, usuario.id)
+
+        client.cookies.set("refresh_token", token, path="/api/v1/auth")
+        assert (await client.post("/auth/refresh")).status_code == 401
+
+    async def test_motivo_da_revogacao_e_registrado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        from app.models.refresh_token import MotivoRevogacao
+
+        email, senha = await criar_usuario(client)
+        await login(client, email, senha)
+        await client.post("/auth/refresh")  # rotação
+        await client.post("/auth/logout")  # logout
+
+        motivos = (await db.execute(select(RefreshToken.revoked_reason))).scalars().all()
+        assert MotivoRevogacao.ROTACAO in motivos
+        assert MotivoRevogacao.LOGOUT in motivos
