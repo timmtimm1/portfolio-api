@@ -119,5 +119,30 @@ async def client(db: AsyncSession) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.fixture
+def contar_queries(engine: object) -> Iterator[list[str]]:
+    """Registra todo SELECT que chega ao banco durante o teste.
+
+    E o unico jeito de provar ausencia de N+1: um endpoint com N+1 devolve a
+    resposta certa e passa em qualquer teste funcional -- ele so e "lento", e
+    lentidao nao falha teste. Contando as consultas, o defeito vira uma
+    asserção objetiva.
+    """
+    from sqlalchemy import event
+
+    capturadas: list[str] = []
+
+    def _antes(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        if statement.lstrip().upper().startswith("SELECT"):
+            capturadas.append(statement)
+
+    motor = engine.sync_engine  # type: ignore[attr-defined]
+    event.listen(motor, "before_cursor_execute", _antes)
+    try:
+        yield capturadas
+    finally:
+        event.remove(motor, "before_cursor_execute", _antes)
+
+
+@pytest.fixture
 def senha_valida() -> str:
     return "carteira-b3-2026-forte"

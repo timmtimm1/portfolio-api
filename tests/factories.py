@@ -99,3 +99,28 @@ async def criar_historico(
         preco *= Decimal("1.01")
     await db.commit()
     return pontos
+
+
+async def segunda_conta(client: AsyncClient) -> dict[str, str]:
+    """Cabecalho de um SEGUNDO usuario, para testes de isolamento."""
+    email, senha = await criar_usuario(client, email=email_unico("outro"))
+    return {"Authorization": f"Bearer {await login(client, email, senha)}"}
+
+
+def op(
+    ticker: str = "PETR4",
+    side: str = "compra",
+    quantity: str = "100",
+    price: str = "20.00",
+    traded_at: str = "2026-01-05",
+    fees: str = "0",
+) -> dict[str, str]:
+    """Corpo de uma transacao, com padroes sensatos."""
+    return {
+        "ticker": ticker,
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "fees": fees,
+        "traded_at": traded_at,
+    }

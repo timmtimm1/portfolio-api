@@ -9,6 +9,16 @@ gerar um DROP TABLE achando que ela sobra no banco.
 from app.models.asset import Asset, AssetType, PriceHistory
 from app.models.base import Base
 from app.models.refresh_token import RefreshToken
+from app.models.transaction import Transaction, TransactionSide
 from app.models.user import User
 
-__all__ = ["Asset", "AssetType", "Base", "PriceHistory", "RefreshToken", "User"]
+__all__ = [
+    "Asset",
+    "AssetType",
+    "Base",
+    "PriceHistory",
+    "RefreshToken",
+    "Transaction",
+    "TransactionSide",
+    "User",
+]

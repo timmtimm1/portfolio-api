@@ -15,7 +15,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 3 | Sessão: rotação de refresh token, detecção de reuso, rate limit | ✅ |
 | 4 | Suíte de testes com Postgres efêmero + CI | ✅ |
 | 5 | Catálogo de ativos da B3 e carga histórica | ✅ |
-| 6 | Livro de transações e cálculo de posição | ⬜ |
+| 6 | Livro de transações e cálculo de posição | ✅ |
 | 7 | Cotações (brapi/yfinance) com cache | ⬜ |
 | 8 | Métricas: retorno, volatilidade, correlação | ⬜ |
 | 9 | Otimização de Markowitz | ⬜ |
@@ -46,6 +46,21 @@ models/     tabelas
 core/       config, sessão de banco, segurança, dependências
 ```
 
+## Regras de negócio
+
+**Custo médio ponderado, a regra brasileira.** A venda **não altera o preço médio** —
+reduz quantidade e custo proporcionalmente, deixando a divisão intacta. Quem implementa
+FIFO por hábito de mercado estrangeiro produz preço médio errado e, com ele, imposto
+errado. Taxas de compra entram no custo de aquisição; taxas de venda saem do resultado.
+
+**A posição é derivada, nunca armazenada.** Quantidade e preço médio são reconstruídos
+do livro a cada consulta. Uma coluna de saldo seria mais rápida e criaria duas fontes da
+verdade — e quando elas divergissem, ninguém saberia qual está certa.
+
+**Validação retroativa.** Lançar uma operação recalcula o livro inteiro daquele ativo em
+ordem cronológica: uma venda com data antiga pode ser inválida mesmo com a posição de
+hoje sendo positiva. Conferir só o saldo atual deixaria esse caso passar.
+
 ## Decisões de segurança
 
 Cada uma está justificada na docstring do módulo correspondente.
@@ -74,6 +89,8 @@ Cada uma está justificada na docstring do módulo correspondente.
   seria negação de serviço contra o próprio usuário.
 - **Chave primária em UUID**: não há id sequencial para enumerar.
 - **CSP, HSTS, `X-Frame-Options`, `nosniff`, `Referrer-Policy`** em toda resposta.
+- **Toda consulta filtra por `user_id`**, num único ponto centralizado — e recurso de
+  outro usuário devolve **404, não 403** (403 confirmaria que aquele id existe).
 - **`pip-audit` no CI**, semanalmente — a maior parte das falhas de uma aplicação não
   está no código dela, está no que ela importa.
 
