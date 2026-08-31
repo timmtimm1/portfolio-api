@@ -46,6 +46,24 @@ models/     tabelas
 core/       config, sessão de banco, segurança, dependências
 ```
 
+## Carteiras: a real e as simuladas
+
+Cada usuário tem uma **Carteira real** (criada automaticamente) e quantas simulações
+quiser. A simulada usa exatamente a mesma matemática — mesmo preço médio, mesma cotação,
+mesma fronteira eficiente. O tipo existe para que a interface nunca confunda *"o que eu
+tenho"* com *"o que estou avaliando"*, e a simulada aparece com um selo âmbar.
+
+Três decisões que sustentam isso:
+
+- **A chave do snapshot é `(carteira, dia)`**, não `(usuário, dia)`. Fosse a segunda, a
+  simulada sobrescreveria a foto da real silenciosamente.
+- **Autorização em ponto único**: `get_carteira` é o único caminho pelo qual um
+  `portfolio_id` vindo do cliente entra no sistema, e ele busca por id **e** por dono na
+  mesma consulta. Daqui para dentro, carteira alheia não existe — os serviços filtram só
+  por `portfolio_id`, sem repetir a checagem. 404, nunca 403.
+- **A carteira padrão é a real, escolhida pelo tipo** — não "a primeira da lista". Onde
+  uma transação sem `portfolio_id` é lançada não pode depender de ordenação.
+
 ## Regras de negócio
 
 **Custo médio ponderado, a regra brasileira.** A venda **não altera o preço médio** —

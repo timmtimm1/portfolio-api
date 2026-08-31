@@ -79,7 +79,7 @@ async def metricas(
 
 async def metricas_da_carteira(
     db: AsyncSession,
-    user_id: uuid.UUID,
+    portfolio_id: uuid.UUID,
     *,
     taxa_livre_risco: float,
     desde: date_type | None = None,
@@ -90,6 +90,6 @@ async def metricas_da_carteira(
     So posicoes abertas: nao faz sentido medir o risco de um papel que ele nao
     tem mais. O resultado ja realizado nele esta em /portfolio/summary.
     """
-    posicoes = await transaction_service.posicoes(db, user_id)
+    posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertos = [p.ticker for p in posicoes if not p.esta_zerada]
     return await metricas(db, abertos, taxa_livre_risco=taxa_livre_risco, desde=desde, ate=ate)

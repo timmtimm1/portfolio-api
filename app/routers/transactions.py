@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.core.deps import CurrentUser, DbDep, ProvedorDep, SettingsDep
+from app.core.deps import CarteiraAtual, DbDep, ProvedorDep, SettingsDep
 from app.models.transaction import TransactionSide
 from app.schemas.common import LIMITE_MAXIMO, LIMITE_PADRAO, Page
 from app.schemas.portfolio import PortfolioSummary
@@ -35,7 +35,7 @@ _NAO_ENCONTRADA = HTTPException(
     summary="Registra uma compra ou venda",
 )
 async def criar_transacao(
-    usuario: CurrentUser, db: DbDep, dados: TransactionCreate
+    carteira: CarteiraAtual, db: DbDep, dados: TransactionCreate
 ) -> TransactionRead:
     """Lanca uma operacao no livro.
 
@@ -44,7 +44,7 @@ async def criar_transacao(
     outra pessoa -- e a falha de autorizacao mais direta que existe.
     """
     try:
-        transacao = await transaction_service.criar(db, usuario.id, dados)
+        transacao = await transaction_service.criar(db, carteira, dados)
     except AtivoNaoEncontradoError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -58,14 +58,14 @@ async def criar_transacao(
     # O historico a partir da data da operacao passou a estar errado: ele foi
     # calculado sem esta transacao. Refazer aqui mantem o grafico de evolucao
     # coerente com o livro, em vez de "travado" no estado anterior.
-    await snapshot_service.reconstruir_desde(db, usuario.id, dados.traded_at)
+    await snapshot_service.reconstruir_desde(db, carteira, dados.traded_at)
 
     return TransactionRead.model_validate(transacao)
 
 
 @router.get("/transactions", response_model=Page[TransactionRead], summary="Lista as operacoes")
 async def listar_transacoes(
-    usuario: CurrentUser,
+    carteira: CarteiraAtual,
     db: DbDep,
     ticker: Annotated[str | None, Query(max_length=12)] = None,
     side: Annotated[TransactionSide | None, Query()] = None,
@@ -74,7 +74,7 @@ async def listar_transacoes(
 ) -> Page[TransactionRead]:
     """Extrato paginado, do mais recente para o mais antigo."""
     itens, total = await transaction_service.listar(
-        db, usuario.id, ticker=ticker, side=side, limit=limit, offset=offset
+        db, carteira.id, ticker=ticker, side=side, limit=limit, offset=offset
     )
     return Page[TransactionRead](
         items=[TransactionRead.model_validate(t) for t in itens],
@@ -90,9 +90,9 @@ async def listar_transacoes(
     summary="Detalhe de uma operacao",
 )
 async def obter_transacao(
-    usuario: CurrentUser, db: DbDep, transacao_id: uuid.UUID
+    carteira: CarteiraAtual, db: DbDep, transacao_id: uuid.UUID
 ) -> TransactionRead:
-    transacao = await transaction_service.obter(db, usuario.id, transacao_id)
+    transacao = await transaction_service.obter(db, carteira.id, transacao_id)
     if transacao is None:
         raise _NAO_ENCONTRADA
     return TransactionRead.model_validate(transacao)
@@ -103,19 +103,19 @@ async def obter_transacao(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove uma operacao",
 )
-async def remover_transacao(usuario: CurrentUser, db: DbDep, transacao_id: uuid.UUID) -> None:
+async def remover_transacao(carteira: CarteiraAtual, db: DbDep, transacao_id: uuid.UUID) -> None:
     """Remove e revalida o livro.
 
     Apagar uma compra antiga pode invalidar vendas posteriores que dependiam
     dela; nesse caso a remocao e recusada e o livro fica intacto.
     """
-    existente = await transaction_service.obter(db, usuario.id, transacao_id)
+    existente = await transaction_service.obter(db, carteira.id, transacao_id)
     if existente is None:
         raise _NAO_ENCONTRADA
     dia = existente.traded_at
 
     try:
-        removida = await transaction_service.remover(db, usuario.id, transacao_id)
+        removida = await transaction_service.remover(db, carteira.id, transacao_id)
     except VendaSemPosicaoError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -126,7 +126,7 @@ async def remover_transacao(usuario: CurrentUser, db: DbDep, transacao_id: uuid.
 
     # Sem isto, o grafico continuaria mostrando um patrimonio que nao
     # corresponde a nenhuma operacao do livro.
-    await snapshot_service.reconstruir_desde(db, usuario.id, dia)
+    await snapshot_service.reconstruir_desde(db, carteira, dia)
 
 
 @router.get(
@@ -134,7 +134,7 @@ async def remover_transacao(usuario: CurrentUser, db: DbDep, transacao_id: uuid.
     response_model=list[PositionRead],
     summary="Posicao consolidada da carteira",
 )
-async def listar_posicoes(usuario: CurrentUser, db: DbDep) -> list[PositionRead]:
+async def listar_posicoes(carteira: CarteiraAtual, db: DbDep) -> list[PositionRead]:
     """Quantidade, preco medio e resultado realizado por ativo.
 
     Nada disso e coluna no banco: tudo e reconstruido do livro a cada consulta.
@@ -151,7 +151,7 @@ async def listar_posicoes(usuario: CurrentUser, db: DbDep) -> list[PositionRead]
             custo_total=p.custo_total,
             resultado_realizado=p.resultado_realizado,
         )
-        for p in await transaction_service.posicoes(db, usuario.id)
+        for p in await transaction_service.posicoes(db, carteira.id)
     ]
 
 
@@ -161,7 +161,7 @@ async def listar_posicoes(usuario: CurrentUser, db: DbDep) -> list[PositionRead]
     summary="Carteira com valor de mercado e rentabilidade",
 )
 async def resumo_da_carteira(
-    usuario: CurrentUser, db: DbDep, provedor: ProvedorDep, settings: SettingsDep
+    carteira: CarteiraAtual, db: DbDep, provedor: ProvedorDep, settings: SettingsDep
 ) -> PortfolioSummary:
     """Posicao consolidada com cotacao atual, valor de mercado e resultado.
 
@@ -175,5 +175,5 @@ async def resumo_da_carteira(
     melhor que falhar.
     """
     return await portfolio_service.resumo(
-        db, provedor, usuario.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
     )

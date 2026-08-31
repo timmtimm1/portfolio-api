@@ -6,7 +6,7 @@ import uuid
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.clients.bcb import BcbClient
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import decode_token
+from app.models.portfolio import Portfolio
 from app.models.user import User
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -76,3 +77,40 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 ProvedorDep = Annotated[ProvedorDeCotacoes, Depends(get_provedor_de_cotacoes)]
 
 BcbDep = Annotated[BcbClient, Depends(get_bcb_client)]
+
+
+async def get_carteira(
+    usuario: Annotated[User, Depends(get_current_user)],
+    db: DbDep,
+    portfolio_id: Annotated[
+        uuid.UUID | None, Query(description="Carteira. Omitido = a carteira padrao.")
+    ] = None,
+) -> Portfolio:
+    """Resolve a carteira do request, verificando que ela e do usuario.
+
+    ## O novo ponto unico de autorizacao
+
+    Com varias carteiras, o cliente passa a informar um `portfolio_id` -- e ai
+    mora a falha classica: aceitar esse id sem conferir de quem ele e. Bastaria
+    trocar um UUID na URL para ler a carteira alheia.
+
+    Esta dependencia e o unico caminho pelo qual um `portfolio_id` entra no
+    sistema. Ela busca por id E por dono na mesma consulta; carteira de outro
+    usuario simplesmente nao existe daqui para dentro. Por isso os servicos
+    adiante podem filtrar so por `portfolio_id`, sem repetir a checagem.
+
+    404, nao 403: dizer "existe, mas nao e sua" confirmaria a existencia daquele
+    id -- enumeracao de recursos alheios.
+    """
+    from app.services import portfolio_crud
+
+    if portfolio_id is None:
+        return await portfolio_crud.obter_padrao(db, usuario.id)
+
+    carteira = await portfolio_crud.obter(db, usuario.id, portfolio_id)
+    if carteira is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carteira nao encontrada")
+    return carteira
+
+
+CarteiraAtual = Annotated[Portfolio, Depends(get_carteira)]

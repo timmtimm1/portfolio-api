@@ -59,7 +59,7 @@ def _retornos_esperados(series: SeriesAlinhadas, tickers: list[str]) -> np.ndarr
 
 async def otimizar(
     db: AsyncSession,
-    user_id: uuid.UUID,
+    portfolio_id: uuid.UUID,
     pedido: OptimizationRequest,
     *,
     taxa_livre_risco: float,
@@ -71,7 +71,7 @@ async def otimizar(
     que e o que permite ao grafico mostrar "voce esta aqui, a fronteira esta ali".
     """
     da_carteira = pedido.tickers is None
-    posicoes = await transaction_service.posicoes(db, user_id)
+    posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertas = [p for p in posicoes if not p.esta_zerada]
 
     pedidos = (

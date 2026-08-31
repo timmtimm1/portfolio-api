@@ -37,10 +37,17 @@ class PortfolioSnapshot(Base, TimestampMixin):
 
     __tablename__ = "portfolio_snapshots"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    # A chave e (carteira, dia), nao (usuario, dia): com varias carteiras, uma
+    # foto por usuario por dia colidiria entre elas -- e a simulada sobrescreveria
+    # a real, silenciosamente.
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True
     )
     date: Mapped[date_type] = mapped_column(Date, primary_key=True)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     custo_total: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     valor_mercado: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)

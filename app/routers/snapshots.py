@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.core.deps import BcbDep, CurrentUser, DbDep, ProvedorDep, SettingsDep
+from app.core.deps import BcbDep, CarteiraAtual, DbDep, ProvedorDep, SettingsDep
 from app.core.rate_limit import limiter
 from app.core.service_auth import ChaveDeServico
 from app.models.benchmark import Indexador
@@ -33,7 +33,7 @@ LIMITE_MAXIMO = 500
     summary="Evolucao historica da carteira",
 )
 async def historico(
-    usuario: CurrentUser,
+    carteira: CarteiraAtual,
     db: DbDep,
     desde: Annotated[date_type | None, Query()] = None,
     ate: Annotated[date_type | None, Query()] = None,
@@ -44,7 +44,7 @@ async def historico(
     E o unico dado do sistema que NAO e reconstruivel: o valor de mercado de
     ontem dependia da cotacao de ontem, que ja foi sobrescrita no cache.
     """
-    pontos = await snapshot_service.historico(db, usuario.id, desde=desde, ate=ate, limit=limit)
+    pontos = await snapshot_service.historico(db, carteira.id, desde=desde, ate=ate, limit=limit)
     return [SnapshotRead.model_validate(p) for p in pontos]
 
 
@@ -54,7 +54,7 @@ async def historico(
     summary="Evolucao da carteira comparada ao CDI ou a Selic",
 )
 async def evolucao(
-    usuario: CurrentUser,
+    carteira: CarteiraAtual,
     db: DbDep,
     bcb: BcbDep,
     indexador: Annotated[Indexador, Query(description="cdi ou selic")] = Indexador.CDI,
@@ -73,7 +73,7 @@ async def evolucao(
     nao muda, entao ela e gravada uma vez e nunca mais buscada.
     """
     snapshots, curva, taxas, motivo = await benchmark_service.evolucao_comparada(
-        db, bcb, usuario.id, indexador, desde=desde, ate=ate, limite=limit
+        db, bcb, carteira.id, indexador, desde=desde, ate=ate, limite=limit
     )
     pontos = [SnapshotRead.model_validate(s) for s in snapshots]
     rentabilidade = [

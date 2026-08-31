@@ -21,10 +21,10 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, coluna_enum
 
 
 class MotivoRevogacao(enum.StrEnum):
@@ -78,8 +78,7 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # apenas "desconhecido", indistinguivel de lixo, e o roubo passaria batido.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     revoked_reason: Mapped[MotivoRevogacao | None] = mapped_column(
-        Enum(MotivoRevogacao, native_enum=False, length=12, validate_strings=True),
-        default=None,
+        coluna_enum(MotivoRevogacao, length=12), default=None
     )
 
     def __repr__(self) -> str:

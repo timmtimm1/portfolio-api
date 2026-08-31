@@ -23,6 +23,10 @@ let ultimaEvolucao = null;
 // Percentual por padrao: em reais, uma carteira que cresceu esmaga a escala e
 // o CDI vira uma linha reta, sem informacao nenhuma.
 let escala = "pct";
+// Carteira ativa. Vai como `portfolio_id` em toda chamada de carteira --
+// omitir usaria a real, e o usuario veria dados de outra carteira sem entender.
+let carteiraAtiva = null;
+let carteiras = [];
 
 /* ═══ HTTP ═══ */
 
@@ -109,6 +113,43 @@ function mostrarLogin() {
   token = null;
 }
 
+function comCarteira(caminho) {
+  // Anexa a carteira ativa a uma rota de carteira.
+  //
+  // Omitir o parametro faria a API usar a carteira REAL por padrao -- e o
+  // usuario veria os dados de uma carteira diferente da que ele selecionou,
+  // sem nenhum aviso. Por isso o parametro e sempre explicito no cliente.
+  if (!carteiraAtiva) return caminho;
+  const separador = caminho.includes("?") ? "&" : "?";
+  return `${caminho}${separador}portfolio_id=${carteiraAtiva}`;
+}
+
+async function carregarCarteiras() {
+  carteiras = await api("/portfolios");
+  if (!carteiras.some((c) => c.id === carteiraAtiva)) {
+    carteiraAtiva = carteiras[0]?.id ?? null;
+  }
+
+  const select = $("#carteira");
+  limpar(select);
+  for (const c of carteiras) {
+    const opcao = el("option", null, c.nome);
+    opcao.value = c.id;
+    if (c.id === carteiraAtiva) opcao.selected = true;
+    select.append(opcao);
+  }
+
+  const atual = carteiras.find((c) => c.id === carteiraAtiva);
+  const pilula = $("#pilula-tipo");
+  if (atual && atual.tipo === "simulada") {
+    pilula.className = "pilula pilula--simulada";
+    pilula.textContent = "simulação";
+    pilula.hidden = false;
+  } else {
+    pilula.hidden = true;
+  }
+}
+
 async function entrarNoApp() {
   // Carrega os dados ANTES de trocar de tela.
   //
@@ -117,6 +158,7 @@ async function entrarNoApp() {
   // elemento que não está mais visível. O usuário fica olhando uma página em
   // branco sem nenhuma explicação.
   const eu = await api("/auth/me");
+  await carregarCarteiras();
   usuarioEmail = eu.email;
   $("#usuario-email").textContent = eu.email;
   $("#avatar").textContent = eu.email.slice(0, 2).toUpperCase();
@@ -204,8 +246,8 @@ document.addEventListener("click", (ev) => {
 async function carregarVisao() {
   const indexador = $("#indexador").value;
   const [resumo, evolucao] = await Promise.all([
-    api("/portfolio/summary"),
-    api(`/portfolio/evolution?limit=250${indexador ? `&indexador=${indexador}` : ""}`),
+    api(comCarteira("/portfolio/summary")),
+    api(comCarteira(`/portfolio/evolution?limit=250${indexador ? `&indexador=${indexador}` : ""}`)),
   ]);
 
   const t = resumo.totals;
@@ -230,7 +272,7 @@ async function carregarVisao() {
   ultimaEvolucao = evolucao;
   desenharEvolucao(evolucao);
   renderPosicoesResumo(resumo.positions);
-  renderOperacoesResumo(await api("/transactions?limit=5"));
+  renderOperacoesResumo(await api(comCarteira("/transactions?limit=5")));
 }
 
 function renderPosicoesResumo(posicoes) {
@@ -458,8 +500,8 @@ $("#indexador").addEventListener("change", () => {
 async function carregarPosicoes() {
   carregado.posicoes = true;
   const [resumo, metricas] = await Promise.all([
-    api("/portfolio/summary"),
-    api("/portfolio/metrics"),
+    api(comCarteira("/portfolio/summary")),
+    api(comCarteira("/portfolio/metrics")),
   ]);
 
   const corpo = $("#tabela-posicoes tbody");
@@ -531,7 +573,7 @@ async function otimizar() {
   botao.disabled = true;
   botao.textContent = "Calculando…";
   try {
-    const r = await api("/portfolio/optimize", {
+    const r = await api(comCarteira("/portfolio/optimize"), {
       method: "POST",
       body: JSON.stringify({ peso_maximo: Number($("#peso-maximo").value), pontos: 40 }),
     });
@@ -670,7 +712,7 @@ function renderCarteiras(r) {
 
 async function carregarTransacoes() {
   carregado.transacoes = true;
-  const pagina = await api("/transactions?limit=100");
+  const pagina = await api(comCarteira("/transactions?limit=100"));
   const corpo = $("#tabela-operacoes tbody");
   limpar(corpo);
 
@@ -700,7 +742,7 @@ async function carregarTransacoes() {
     apagar.addEventListener("click", async () => {
       if (!confirm(`Remover a ${t.side} de ${num(t.quantity)} ${t.ticker}?`)) return;
       try {
-        await api(`/transactions/${t.id}`, { method: "DELETE" });
+        await api(comCarteira(`/transactions/${t.id}`), { method: "DELETE" });
         invalidar();
         await carregarTransacoes();
       } catch (e) {
@@ -733,7 +775,7 @@ $("#form-op").addEventListener("submit", async (ev) => {
   const erro = $("#op-erro");
   erro.hidden = true;
   try {
-    await api("/transactions", {
+    await api(comCarteira("/transactions"), {
       method: "POST",
       body: JSON.stringify({
         ticker: $("#op-ticker").value.trim().toUpperCase(),
@@ -799,3 +841,28 @@ document.addEventListener("click", (ev) => {
 renovar()
   .then((ok) => (ok ? entrarNoApp() : mostrarLogin()))
   .catch(mostrarLogin);
+
+
+/* ═══ Troca de carteira ═══ */
+
+$("#carteira").addEventListener("change", async (ev) => {
+  carteiraAtiva = ev.target.value;
+  invalidar();
+  await carregarCarteiras();
+});
+
+$("#btn-nova-carteira").addEventListener("click", async () => {
+  const nome = prompt("Nome da carteira simulada:");
+  if (!nome?.trim()) return;
+  try {
+    const nova = await api("/portfolios", {
+      method: "POST",
+      body: JSON.stringify({ nome: nome.trim(), tipo: "simulada" }),
+    });
+    carteiraAtiva = nova.id;
+    invalidar();
+    await carregarCarteiras();
+  } catch (e) {
+    alert(e.message);
+  }
+});

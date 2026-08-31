@@ -165,6 +165,26 @@ h1, h2, h3, p { margin: 0; }
 
 .lateral-titulo { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--txt-3); padding: 6px 10px; }
 .nav { display: grid; gap: 3px; }
+
+.seletor-carteira { display: flex; gap: 6px; padding: 0 4px 6px; }
+.seletor-carteira select {
+  flex: 1; min-width: 0;
+  background: var(--superficie-2); border: 1px solid var(--borda);
+  border-radius: var(--r-s); padding: 8px 10px; font-size: 12.5px; outline: none;
+}
+.seletor-carteira select:focus { border-color: rgba(123, 92, 255, .5); }
+.seletor-carteira button {
+  width: 34px; flex: 0 0 auto; border-radius: var(--r-s);
+  background: rgba(123, 92, 255, .16); color: var(--violeta-2);
+  font-size: 17px; font-weight: 600; line-height: 1;
+}
+.seletor-carteira button:hover { background: rgba(123, 92, 255, .28); }
+/* Simulada em âmbar: a cor sinaliza "isto não é dinheiro seu" antes de a pessoa
+   ler o rótulo. Confundir simulação com posição real é o erro que este projeto
+   inteiro não pode cometer. */
+.pilula--simulada {
+  color: var(--ouro); border-color: rgba(245, 181, 74, .35); background: rgba(245, 181, 74, .12);
+}
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   padding: 10px 12px; border-radius: var(--r-s);

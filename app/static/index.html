@@ -45,6 +45,12 @@
       <span>Portfolio</span>
     </div>
 
+    <p class="lateral-titulo">Carteira</p>
+    <div class="seletor-carteira">
+      <select id="carteira" aria-label="Carteira ativa"></select>
+      <button type="button" id="btn-nova-carteira" title="Nova carteira simulada">+</button>
+    </div>
+
     <p class="lateral-titulo">Principal</p>
     <nav class="nav">
       <button class="nav-item is-ativo" data-vista="visao"><span class="nav-ic" data-ic="grid"></span>Visão geral<span class="nav-seta">›</span></button>
@@ -84,6 +90,7 @@
     <section class="vista" data-vista="visao">
       <div class="titulo-linha">
         <h1>Visão geral</h1>
+        <span class="pilula" id="pilula-tipo" hidden></span>
         <span class="selo" id="selo-atualizado">—</span>
       </div>
 

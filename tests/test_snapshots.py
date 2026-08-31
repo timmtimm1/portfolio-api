@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.snapshot import PortfolioSnapshot
 from app.models.user import User
 from tests.conftest import ProvedorFake
-from tests.factories import criar_ativo, op, segunda_conta, usuario_logado
+from tests.factories import carteira_de, criar_ativo, op, segunda_conta, usuario_logado
 
 CHAVE = "chave-de-servico-de-teste-com-entropia-suficiente-aqui"
 
@@ -228,11 +228,12 @@ class TestHistorico:
     ) -> None:
         await criar_ativo(db, ticker="PETR4")
         email, h = await usuario_logado(client)
-        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        carteira = await carteira_de(db, email)
         for dia in (date(2026, 8, 10), date(2026, 8, 12), date(2026, 8, 11)):
             db.add(
                 PortfolioSnapshot(
-                    user_id=usuario.id,
+                    portfolio_id=carteira.id,
+                    user_id=carteira.user_id,
                     date=dia,
                     custo_total=1000,
                     valor_mercado=1100,
@@ -298,8 +299,8 @@ class TestBackfill:
             headers=h,
         )
 
-        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
-        await snapshot_service.backfill(db, usuario.id, desde=base)
+        carteira = await carteira_de(db, email)
+        await snapshot_service.backfill(db, carteira, desde=base)
 
         dia_10 = (
             await db.execute(
@@ -336,9 +337,9 @@ class TestBackfill:
 
         email, h = await usuario_logado(client)
         await client.post("/transactions", json=op(traded_at="2026-01-15"), headers=h)
-        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        carteira = await carteira_de(db, email)
 
-        gravados = await snapshot_service.backfill(db, usuario.id, desde=base)
+        gravados = await snapshot_service.backfill(db, carteira, desde=base)
 
         primeiro = await db.scalar(select(func.min(PortfolioSnapshot.date)))
         assert primeiro == date(2026, 1, 15)
@@ -348,8 +349,8 @@ class TestBackfill:
         from app.services import snapshot_service
 
         email, _ = await usuario_logado(client)
-        usuario = (await db.execute(select(User).where(User.email == email))).scalar_one()
-        assert await snapshot_service.backfill(db, usuario.id, desde=date(2026, 1, 1)) == 0
+        carteira = await carteira_de(db, email)
+        assert await snapshot_service.backfill(db, carteira, desde=date(2026, 1, 1)) == 0
 
 
 class TestHistoricoAcompanhaOLivro:

@@ -15,6 +15,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, AssetType, PriceHistory
+from app.models.portfolio import Portfolio
 
 _contador = itertools.count()
 
@@ -124,3 +125,21 @@ def op(
         "fees": fees,
         "traded_at": traded_at,
     }
+
+
+async def carteira_de(db: AsyncSession, email: str) -> Portfolio:
+    """A carteira padrão do usuário, criando-a se ainda não existir.
+
+    Necessário porque os serviços passaram a operar por CARTEIRA, não por
+    usuário: um teste que chama o serviço direto precisa do mesmo objeto que a
+    dependência `get_carteira` entregaria à rota.
+    """
+    from sqlalchemy import select
+
+    from app.models.user import User
+    from app.services import portfolio_crud
+
+    usuario = (
+        await db.execute(select(User).where(User.email == email.strip().lower()))
+    ).scalar_one()
+    return await portfolio_crud.obter_padrao(db, usuario.id)

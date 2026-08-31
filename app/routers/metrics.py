@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Query
 
-from app.core.deps import CurrentUser, DbDep, SettingsDep
+from app.core.deps import CarteiraAtual, CurrentUser, DbDep, SettingsDep
 from app.schemas.metrics import PortfolioMetrics
 from app.schemas.optimization import OptimizationRequest, OptimizationResponse
 from app.services import metrics_service, optimizer_service
@@ -27,7 +27,7 @@ MAXIMO_ATIVOS = 50
     summary="Risco e retorno da carteira",
 )
 async def metricas_da_carteira(
-    usuario: CurrentUser,
+    carteira: CarteiraAtual,
     db: DbDep,
     settings: SettingsDep,
     desde: Annotated[date_type | None, Query(description="Inicio da janela (AAAA-MM-DD)")] = None,
@@ -40,7 +40,7 @@ async def metricas_da_carteira(
     certa e o significado errado.
     """
     return await metrics_service.metricas_da_carteira(
-        db, usuario.id, taxa_livre_risco=settings.RISK_FREE_RATE, desde=desde, ate=ate
+        db, carteira.id, taxa_livre_risco=settings.RISK_FREE_RATE, desde=desde, ate=ate
     )
 
 
@@ -73,7 +73,7 @@ async def metricas_de_ativos(
     summary="Fronteira eficiente de Markowitz",
 )
 async def otimizar_carteira(
-    usuario: CurrentUser,
+    carteira: CarteiraAtual,
     db: DbDep,
     settings: SettingsDep,
     pedido: Annotated[OptimizationRequest | None, Body()] = None,
@@ -107,5 +107,5 @@ async def otimizar_carteira(
     # assinatura seria construido UMA vez, no import, e compartilhado por todos
     # os requests -- a armadilha classica do argumento padrao mutavel em Python.
     return await optimizer_service.otimizar(
-        db, usuario.id, pedido or OptimizationRequest(), taxa_livre_risco=settings.RISK_FREE_RATE
+        db, carteira.id, pedido or OptimizationRequest(), taxa_livre_risco=settings.RISK_FREE_RATE
     )

@@ -6,10 +6,10 @@ import enum
 from datetime import date as date_type
 from decimal import Decimal
 
-from sqlalchemy import Date, Enum, Numeric
+from sqlalchemy import Date, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, coluna_enum
 
 
 class Indexador(enum.StrEnum):
@@ -39,7 +39,7 @@ class BenchmarkRate(Base):
     __tablename__ = "benchmark_rates"
 
     indexador: Mapped[Indexador] = mapped_column(
-        Enum(Indexador, native_enum=False, length=10, validate_strings=True), primary_key=True
+        coluna_enum(Indexador, length=10), primary_key=True
     )
     date: Mapped[date_type] = mapped_column(Date, primary_key=True)
 

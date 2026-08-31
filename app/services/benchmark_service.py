@@ -22,6 +22,7 @@ entrou (ou saiu) naquele dia. E o mesmo tratamento que um fundo daria.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import date as date_type
 from decimal import Decimal
@@ -148,7 +149,7 @@ NOMES = {Indexador.CDI: "CDI", Indexador.SELIC: "Selic"}
 async def evolucao_comparada(
     db: AsyncSession,
     cliente: BcbClient,
-    user_id: object,
+    portfolio_id: uuid.UUID,
     indexador: Indexador,
     *,
     desde: date_type | None = None,
@@ -156,7 +157,7 @@ async def evolucao_comparada(
     limite: int,
 ) -> tuple[list[PortfolioSnapshot], list[PontoBenchmark], dict[date_type, Decimal], str | None]:
     """Snapshots em ordem cronologica + a curva equivalente do indexador."""
-    stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user_id)
+    stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == portfolio_id)
     if desde is not None:
         stmt = stmt.where(PortfolioSnapshot.date >= desde)
     if ate is not None:

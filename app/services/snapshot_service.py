@@ -16,12 +16,13 @@ from sqlalchemy.orm import selectinload
 
 from app.clients.base import ProvedorDeCotacoes
 from app.models.asset import Asset, PriceHistory
+from app.models.portfolio import Portfolio
 from app.models.snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.snapshot import SnapshotRunResult
 from app.services import quote_service, transaction_service
-from app.services.position import calcular_posicoes
+from app.services.position import Posicao, calcular_posicoes
 
 logger = logging.getLogger(__name__)
 ZERO = Decimal(0)
@@ -52,23 +53,31 @@ async def gravar_de_todos(
     """
     hoje = dia or datetime.now(UTC).date()
 
-    usuarios = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
-    if not usuarios:
+    # Percorre CARTEIRAS de usuarios ativos -- inclusive as simuladas. Uma
+    # simulacao so tem valor se acompanhar o mercado junto com a real; congelar
+    # o historico dela a tornaria inutil como comparacao.
+    carteiras = list(
+        (await db.execute(select(Portfolio).join(User).where(User.is_active.is_(True))))
+        .scalars()
+        .all()
+    )
+    if not carteiras:
         return SnapshotRunResult(
             date=hoje, usuarios_processados=0, snapshots_gravados=0, tickers_consultados=0
         )
 
-    posicoes_por_usuario = {}
+    por_carteira: list[tuple[Portfolio, list[Posicao], Decimal]] = []
     tickers: set[str] = set()
-    for usuario in usuarios:
-        abertas = [
-            p for p in await transaction_service.posicoes(db, usuario.id) if not p.esta_zerada
-        ]
-        realizado = sum(
-            (p.resultado_realizado for p in await transaction_service.posicoes(db, usuario.id)),
-            ZERO,
-        )
-        posicoes_por_usuario[usuario.id] = (abertas, realizado)
+    for carteira in carteiras:
+        # UMA leitura do livro por carteira. Chamar `posicoes()` duas vezes --
+        # uma para as abertas, outra para somar o realizado -- dobraria a
+        # consulta ao banco para obter o mesmo dado.
+        todas = await transaction_service.posicoes(db, carteira.id)
+        abertas = [p for p in todas if not p.esta_zerada]
+        # O realizado soma TODAS as posicoes, inclusive as zeradas: o lucro de um
+        # papel ja vendido continua sendo dinheiro que o usuario ganhou.
+        realizado = sum((p.resultado_realizado for p in todas), ZERO)
+        por_carteira.append((carteira, abertas, realizado))
         tickers.update(p.ticker for p in abertas)
 
     cotacoes = await quote_service.cotacoes_atuais(
@@ -76,7 +85,7 @@ async def gravar_de_todos(
     )
 
     linhas = []
-    for user_id, (abertas, realizado) in posicoes_por_usuario.items():
+    for carteira, abertas, realizado in por_carteira:
         if not abertas and realizado == ZERO:
             # Carteira nunca usada: um ponto de valor zero por dia so poluiria o
             # historico de quem ainda nao comecou.
@@ -95,7 +104,8 @@ async def gravar_de_todos(
 
         linhas.append(
             {
-                "user_id": user_id,
+                "portfolio_id": carteira.id,
+                "user_id": carteira.user_id,
                 "date": hoje,
                 "custo_total": custo,
                 "valor_mercado": valor,
@@ -114,7 +124,7 @@ async def gravar_de_todos(
 
     return SnapshotRunResult(
         date=hoje,
-        usuarios_processados=len(usuarios),
+        usuarios_processados=len(carteiras),
         snapshots_gravados=len(linhas),
         tickers_consultados=len(tickers),
     )
@@ -131,7 +141,7 @@ async def _gravar(db: AsyncSession, linhas: list[dict[str, object]]) -> None:
     stmt = insert(PortfolioSnapshot).values(linhas)
     await db.execute(
         stmt.on_conflict_do_update(
-            index_elements=[PortfolioSnapshot.user_id, PortfolioSnapshot.date],
+            index_elements=[PortfolioSnapshot.portfolio_id, PortfolioSnapshot.date],
             set_={
                 c: stmt.excluded[c]
                 for c in (
@@ -150,14 +160,14 @@ async def _gravar(db: AsyncSession, linhas: list[dict[str, object]]) -> None:
 
 async def historico(
     db: AsyncSession,
-    user_id: uuid.UUID,
+    portfolio_id: uuid.UUID,
     *,
     desde: date_type | None = None,
     ate: date_type | None = None,
     limit: int,
 ) -> list[PortfolioSnapshot]:
     """Historico do usuario, do mais recente para o mais antigo."""
-    stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user_id)
+    stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == portfolio_id)
     if desde is not None:
         stmt = stmt.where(PortfolioSnapshot.date >= desde)
     if ate is not None:
@@ -167,7 +177,7 @@ async def historico(
 
 
 async def backfill(
-    db: AsyncSession, user_id: uuid.UUID, *, desde: date_type, ate: date_type | None = None
+    db: AsyncSession, carteira: Portfolio, *, desde: date_type, ate: date_type | None = None
 ) -> int:
     """Reconstroi snapshots passados a partir do historico de fechamentos.
 
@@ -183,7 +193,7 @@ async def backfill(
     contam. Ignorar isso produziria um grafico em que a carteira sempre teve o
     tamanho de hoje, que e a forma mais convincente de mentir com um grafico.
     """
-    todas = await transaction_service.posicoes(db, user_id)
+    todas = await transaction_service.posicoes(db, carteira.id)
     if not todas:
         return 0
 
@@ -191,7 +201,7 @@ async def backfill(
         (
             await db.execute(
                 select(Transaction)
-                .where(Transaction.user_id == user_id)
+                .where(Transaction.portfolio_id == carteira.id)
                 .options(selectinload(Transaction.asset))
             )
         )
@@ -243,7 +253,8 @@ async def backfill(
 
         linhas.append(
             {
-                "user_id": user_id,
+                "portfolio_id": carteira.id,
+                "user_id": carteira.user_id,
                 "date": dia,
                 "custo_total": custo,
                 "valor_mercado": valor,
@@ -261,7 +272,7 @@ async def backfill(
     return len(linhas)
 
 
-async def reconstruir_desde(db: AsyncSession, user_id: uuid.UUID, dia: date_type) -> int:
+async def reconstruir_desde(db: AsyncSession, carteira: Portfolio, dia: date_type) -> int:
     """Invalida e refaz o historico a partir de um dia.
 
     ## Por que isso precisa existir
@@ -284,17 +295,17 @@ async def reconstruir_desde(db: AsyncSession, user_id: uuid.UUID, dia: date_type
         CursorResult[Any],
         await db.execute(
             delete(PortfolioSnapshot).where(
-                PortfolioSnapshot.user_id == user_id, PortfolioSnapshot.date >= dia
+                PortfolioSnapshot.portfolio_id == carteira.id, PortfolioSnapshot.date >= dia
             )
         ),
     )
     apagados = resultado.rowcount or 0
     await db.commit()
 
-    refeitos = await backfill(db, user_id, desde=dia)
+    refeitos = await backfill(db, carteira, desde=dia)
     logger.info(
-        "[snapshots] historico refeito para %s desde %s: %d apagados, %d recriados",
-        user_id,
+        "[snapshots] historico refeito para a carteira %s desde %s: %d apagados, %d recriados",
+        carteira.id,
         dia,
         apagados,
         refeitos,

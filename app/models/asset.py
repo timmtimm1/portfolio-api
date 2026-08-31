@@ -7,10 +7,10 @@ import uuid
 from datetime import date as date_type
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Enum, ForeignKey, Index, Numeric, String
+from sqlalchemy import BigInteger, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, coluna_enum
 
 
 class AssetType(enum.StrEnum):
@@ -44,16 +44,14 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     nome: Mapped[str | None] = mapped_column(String(120), default=None)
     setor: Mapped[str | None] = mapped_column(String(80), default=None)
 
-    # native_enum=False cria VARCHAR + CHECK em vez de um tipo ENUM do Postgres.
+    # VARCHAR + CHECK em vez de um tipo ENUM nativo do Postgres.
     #
     # Motivo pratico: adicionar um valor a um ENUM nativo exige ALTER TYPE, que
     # tem restricoes de transacao e torna a migration mais fragil; remover um
     # valor e pior ainda. Com VARCHAR + CHECK, incluir "criptomoeda" amanha e uma
-    # migration trivial. O banco continua garantindo o dominio dos valores.
+    # migration trivial, e o banco continua garantindo o dominio.
     tipo: Mapped[AssetType] = mapped_column(
-        Enum(AssetType, native_enum=False, length=20, validate_strings=True),
-        default=AssetType.OUTRO,
-        nullable=False,
+        coluna_enum(AssetType, length=20), default=AssetType.OUTRO, nullable=False
     )
 
     def __repr__(self) -> str:

@@ -20,7 +20,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
 from app.core.middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import excesso_de_requisicoes, limiter
-from app.routers import assets, auth, health, metrics, snapshots, transactions
+from app.routers import assets, auth, health, metrics, portfolios, snapshots, transactions
 
 
 class _EstaticosRevalidados(StaticFiles):
@@ -101,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.API_V1_PREFIX)
     app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
     app.include_router(assets.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(portfolios.router, prefix=settings.API_V1_PREFIX)
     app.include_router(transactions.router, prefix=settings.API_V1_PREFIX)
     app.include_router(metrics.router, prefix=settings.API_V1_PREFIX)
     app.include_router(snapshots.router, prefix=settings.API_V1_PREFIX)

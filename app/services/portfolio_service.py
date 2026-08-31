@@ -18,7 +18,7 @@ CEM = Decimal(100)
 async def resumo(
     db: AsyncSession,
     provedor: ProvedorDeCotacoes,
-    user_id: uuid.UUID,
+    portfolio_id: uuid.UUID,
     *,
     ttl_segundos: int,
 ) -> PortfolioSummary:
@@ -29,7 +29,7 @@ async def resumo(
     fornecedor a toa. O resultado realizado delas continua somando no total,
     porque e dinheiro que o usuario de fato ganhou ou perdeu.
     """
-    posicoes = await transaction_service.posicoes(db, user_id)
+    posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertas = [p for p in posicoes if not p.esta_zerada]
 
     cotacoes = await quote_service.cotacoes_atuais(

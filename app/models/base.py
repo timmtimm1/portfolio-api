@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import enum as enum_py
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import DateTime, Enum, MetaData, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Convencao de nomes para constraints e indices.
@@ -58,4 +59,32 @@ class TimestampMixin:
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+
+def coluna_enum[E: enum_py.Enum](tipo: type[E], *, length: int) -> Enum:
+    """Tipo de coluna para enums, com duas correcoes em relacao ao padrao.
+
+    **`values_callable`** faz o banco guardar o VALOR do membro ("compra"), nao o
+    NOME ("COMPRA"), que e o padrao do SQLAlchemy. Guardar o nome cria uma
+    divergencia silenciosa: a API expoe "compra", o banco tem "COMPRA", e
+    qualquer SQL escrito a mao ou migration com dado literal erra. Foi
+    exatamente o que aconteceu ao introduzir carteiras -- a migration inseriu
+    'real' e a leitura estourou `LookupError`. Alem disso, o valor sobrevive a
+    renomear o membro em Python; o nome, nao.
+
+    **`create_constraint=True`** porque o SQLAlchemy 2.0 NAO cria o CHECK por
+    padrao (mudou na 1.4). Sem ele, `native_enum=False` produz um VARCHAR sem
+    restricao nenhuma -- e o banco aceita qualquer string. A validacao ficava so
+    na aplicacao, que e justamente o que a Etapa 6 argumentou nao bastar: dado
+    invalido que entra por um script ou por um UPDATE manual e dado invalido
+    para sempre.
+    """
+    return Enum(
+        tipo,
+        native_enum=False,
+        length=length,
+        validate_strings=True,
+        values_callable=lambda e: [m.value for m in e],
+        create_constraint=True,
     )

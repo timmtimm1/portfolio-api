@@ -7,11 +7,11 @@ import uuid
 from datetime import date as date_type
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, Numeric, String
+from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.asset import Asset
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, coluna_enum
 
 
 class TransactionSide(enum.StrEnum):
@@ -44,11 +44,22 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         # indice composto importa -- (user_id, asset_id, traded_at) serve tanto
         # "tudo do usuario" quanto "este ativo do usuario"; a ordem inversa nao
         # serviria a primeira consulta.
-        Index("ix_transactions_user_asset_data", "user_id", "asset_id", "traded_at"),
+        Index("ix_transactions_carteira_ativo_data", "portfolio_id", "asset_id", "traded_at"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # A transacao pertence a uma CARTEIRA, que pertence a um usuario.
+    #
+    # `user_id` continua aqui, redundante de proposito: e ele que sustenta o
+    # filtro de autorizacao em toda consulta. Chegar ao dono por um JOIN com
+    # portfolios funcionaria, mas um JOIN esquecido e uma falha de autorizacao --
+    # enquanto uma coluna esquecida no WHERE nao compila o resultado esperado e
+    # aparece no teste.
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # RESTRICT, nao CASCADE: apagar um ativo do catalogo NAO pode apagar o
@@ -60,7 +71,7 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     side: Mapped[TransactionSide] = mapped_column(
-        Enum(TransactionSide, native_enum=False, length=10, validate_strings=True), nullable=False
+        coluna_enum(TransactionSide, length=10), nullable=False
     )
 
     # Numeric(18,8): fracionario existe na B3 (mercado fracionario e cotas de
