@@ -8,8 +8,13 @@ usuario" por toda a suite -- e quando a rota muda, muda em vinte lugares.
 from __future__ import annotations
 
 import itertools
+from datetime import date, timedelta
+from decimal import Decimal
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.asset import Asset, AssetType, PriceHistory
 
 _contador = itertools.count()
 
@@ -48,3 +53,49 @@ async def usuario_logado(client: AsyncClient) -> tuple[str, dict[str, str]]:
     email, senha = await criar_usuario(client)
     token = await login(client, email, senha)
     return email, {"Authorization": f"Bearer {token}"}
+
+
+async def criar_ativo(
+    db: AsyncSession,
+    ticker: str = "PETR4",
+    nome: str | None = None,
+    setor: str = "Energy",
+    tipo: AssetType = AssetType.ACAO,
+) -> Asset:
+    """O nome padrao deriva do ticker de proposito.
+
+    A primeira versao usava "Petroleo Brasileiro S.A." fixo -- e isso fez um teste
+    de busca falhar por motivo errado: um ativo criado como VALE3 herdava esse
+    nome e casava com a busca por "PETR". Valor padrao compartilhado entre
+    objetos distintos e uma armadilha classica de fabrica de teste.
+    """
+    ativo = Asset(ticker=ticker, nome=nome or f"Empresa {ticker}", setor=setor, tipo=tipo)
+    db.add(ativo)
+    await db.commit()
+    await db.refresh(ativo)
+    return ativo
+
+
+async def criar_historico(
+    db: AsyncSession, ativo: Asset, dias: int = 5, inicial: str = "40.00"
+) -> list[PriceHistory]:
+    """Serie diaria sintetica, subindo 1% ao dia a partir de `inicial`.
+
+    Valores deterministicos, nao aleatorios: um teste que usa numero aleatorio
+    passa ou falha por sorte, e quando falha ninguem consegue reproduzir.
+    """
+    hoje = date(2026, 8, 26)
+    pontos = []
+    preco = Decimal(inicial)
+    for i in range(dias):
+        ponto = PriceHistory(
+            asset_id=ativo.id,
+            date=hoje - timedelta(days=dias - 1 - i),
+            close=preco.quantize(Decimal("0.000001")),
+            volume=1_000_000 + i,
+        )
+        db.add(ponto)
+        pontos.append(ponto)
+        preco *= Decimal("1.01")
+    await db.commit()
+    return pontos

@@ -14,7 +14,7 @@ alocações usando a fronteira eficiente de Markowitz.
 | 2 | Registro e login (argon2id + JWT) | ✅ |
 | 3 | Sessão: rotação de refresh token, detecção de reuso, rate limit | ✅ |
 | 4 | Suíte de testes com Postgres efêmero + CI | ✅ |
-| 5 | Catálogo de ativos da B3 e carga histórica | ⬜ |
+| 5 | Catálogo de ativos da B3 e carga histórica | ✅ |
 | 6 | Livro de transações e cálculo de posição | ⬜ |
 | 7 | Cotações (brapi/yfinance) com cache | ⬜ |
 | 8 | Métricas: retorno, volatilidade, correlação | ⬜ |
@@ -86,6 +86,19 @@ make banco                    # Postgres via Docker
 make migrar
 make api                      # http://127.0.0.1:8000/docs
 ```
+
+## Carga inicial de dados
+
+O catálogo e o histórico vêm dos CSVs da pipeline
+[`mercado_financeiro`](https://github.com/timmtimm1/mercado_financeiro) — 151 tickers
+filtrados por liquidez e um ano de fechamentos reais:
+
+```bash
+uv run python -m scripts.seed_b3 --origem ~/Projects/mercado_financeiro
+```
+
+O script é idempotente (upsert por chave natural) e insere em lotes de 5.000 linhas:
+37 mil `INSERT` individuais levariam minutos, o lote leva segundos.
 
 ## Testes
 
