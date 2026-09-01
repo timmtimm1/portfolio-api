@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Loga todo o SQL executado. Util para caçar N+1 no desenvolvimento;
     # ignorado em producao mesmo se ligado por engano (ver app/core/db.py).
     SQL_ECHO: bool = False
+
+    LOG_LEVEL: str = "INFO"
+    # JSON em producao, texto legivel no desenvolvimento. Ler JSON cru num
+    # terminal atrapalha mais do que ajuda; num agregador e o oposto.
+    LOG_JSON: bool = False
+
     PROJECT_NAME: str = "Portfolio Tracker API"
     API_V1_PREFIX: str = "/api/v1"
 

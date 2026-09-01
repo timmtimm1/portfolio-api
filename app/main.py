@@ -18,7 +18,9 @@ from starlette.types import ExceptionHandler
 from app.clients import fechar_http_client
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
-from app.core.middleware import SecurityHeadersMiddleware
+from app.core.logging import configurar as configurar_log
+from app.core.metrics import exportar as exportar_metricas
+from app.core.middleware import ObservabilidadeMiddleware, SecurityHeadersMiddleware
 from app.core.rate_limit import excesso_de_requisicoes, limiter
 from app.routers import assets, auth, health, metrics, portfolios, snapshots, transactions
 
@@ -66,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     suite rodar contra um Postgres efemero sem contaminar nada.
     """
     settings = settings or get_settings()
+    configurar_log(settings.LOG_LEVEL, json_ativo=settings.LOG_JSON)
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -86,6 +89,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # ADICIONADO POR ULTIMO, e por isso roda PRIMEIRO: no Starlette a pilha e
+    # montada de fora para dentro na ordem inversa do registro. Isso garante
+    # que o ID de correlacao exista antes de qualquer outro middleware logar,
+    # e que o tempo medido inclua todos eles -- que e o tempo que o usuario
+    # sentiu, nao o da rota isolada.
+    app.add_middleware(ObservabilidadeMiddleware)
+
     # CORS so entra se houver origem configurada. `allow_credentials=True` com
     # `allow_origins=["*"]` e proibido pelo proprio navegador e e o erro classico:
     # a lista aqui e sempre explicita, vinda do ambiente.
@@ -97,6 +107,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["GET", "POST", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metricas() -> Response:
+        """Ponto de coleta do Prometheus.
+
+        No RAIZ, fora de `/api/v1`, por duas razoes. E a convencao do
+        ecossistema -- todo scraper procura `/metrics` ali. E, mais concreto,
+        `/api/v1/metrics` ja existe: e a rota de metricas de RISCO da carteira,
+        e por um momento esta aqui tomou o lugar dela. Duas coisas com o mesmo
+        nome e significados diferentes e problema de nomenclatura, nao de
+        roteamento.
+
+        Fora do schema de proposito: nao e rota de produto. Sem autenticacao,
+        como e o padrao -- o acesso se restringe na camada de rede, e um
+        segredo compartilhado com o coletor seria mais um segredo para
+        rotacionar sem ganho.
+
+        Nao expoe dado de usuario: os rotulos sao metodo, ROTA (com o parametro
+        ainda como `{id}`) e status, nunca a URL concreta.
+        """
+        corpo, tipo = exportar_metricas()
+        return Response(content=corpo, media_type=tipo)
 
     app.include_router(health.router, prefix=settings.API_V1_PREFIX)
     app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
