@@ -237,12 +237,16 @@ class TestAvisoDeComparacaoFalha:
         assert 'id="evolucao-aviso"' in html
 
     def test_o_aviso_fica_escondido_quando_nao_ha_motivo(self) -> None:
-        """Regressao pontual: `aviso.hidden = !evolucao.motivo` cobre tanto
-        `null` (comparacao ok, ou "sem comparacao" escolhido de proposito)
-        quanto string vazia -- um `= evolucao.motivo` sozinho, sem negar,
-        deixaria o aviso visivel com texto vazio toda vez que desse certo."""
+        """Sem motivo, sem aviso -- inclusive quando `motivo` é string vazia.
+
+        A garantia mora em `mostrarSe()`, que centraliza o par "preenche e
+        mostra, senão esconde". O teste verifica o CONTRATO do helper e o valor
+        que a chamada passa, e não uma linha específica: assim ele sobrevive a
+        refatoração e continua caindo se o comportamento mudar.
+        """
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
-        assert "aviso.hidden = !evolucao.motivo" in js
+        assert "elemento.hidden = !texto" in js, "mostrarSe() precisa esconder sem texto"
+        assert 'mostrarSe($("#evolucao-aviso"), evolucao.motivo)' in js
 
 
 class TestCartaoDeProventos:

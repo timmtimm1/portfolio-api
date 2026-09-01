@@ -177,6 +177,18 @@ function aplicarMascaraData(input) {
 }
 const sinal = (v) => (Number(v) >= 0 ? "pos" : "neg");
 
+/* Mostra o elemento com o texto, ou esconde quando não há texto.
+
+   Este par -- "preenche e mostra, senão esconde" -- aparecia quatro vezes no
+   arquivo, sempre com o mesmo if/else de quatro linhas. Além da repetição, ele
+   centraliza o contrato do `hidden`, que já nos custou caro uma vez: a tela de
+   login não sumia porque `display: grid` no CSS vence o atributo. Com um ponto
+   só, uma correção desse tipo acontece em um lugar. */
+function mostrarSe(elemento, texto) {
+  elemento.textContent = texto || "";
+  elemento.hidden = !texto;
+}
+
 function el(tag, classe, texto) {
   const e = document.createElement(tag);
   if (classe) e.className = classe;
@@ -222,13 +234,8 @@ async function carregarCarteiras() {
 
   const atual = carteiras.find((c) => c.id === carteiraAtiva);
   const pilula = $("#pilula-tipo");
-  if (atual && atual.tipo === "simulada") {
-    pilula.className = "pilula pilula--simulada";
-    pilula.textContent = "simulação";
-    pilula.hidden = false;
-  } else {
-    pilula.hidden = true;
-  }
+  pilula.className = "pilula pilula--simulada";
+  mostrarSe(pilula, atual?.tipo === "simulada" ? "simulação" : "");
 
   // A lixeira some na carteira real -- ela não pode ser apagada. Some, e não
   // fica desabilitada: um botão cinza convida a tentar e depois frustra. A
@@ -500,9 +507,7 @@ function desenharEvolucao(evolucao) {
   // falhou (BCB fora do ar, ou -- caso comum do IPCA -- o mês ainda não foi
   // publicado). Gráfico sem a linha de comparação e sem explicação nenhuma
   // parece defeito do sistema; a API já manda o motivo, faltava a tela ler.
-  const aviso = $("#evolucao-aviso");
-  aviso.textContent = evolucao.motivo || "";
-  aviso.hidden = !evolucao.motivo;
+  mostrarSe($("#evolucao-aviso"), evolucao.motivo);
 
   const conjuntos = [];
   const rotulos = [];
@@ -598,13 +603,12 @@ function desenharEvolucao(evolucao) {
   const c = evolucao.comparacao;
   if (c && c.excesso_pontos_percentuais !== null) {
     const excesso = Number(c.excesso_pontos_percentuais);
-    selo.className = `selo-comparacao ${excesso >= 0 ? "acima" : "abaixo"}`;
-    selo.textContent =
-      excesso >= 0
-        ? `${pct(excesso / 100, 2)} acima do ${nomeBench}`
-        : `${pct(excesso / 100, 2)} abaixo do ${nomeBench}`;
+    // Uma palavra muda entre os dois casos, não a frase inteira. Duplicar o
+    // texto convidava as duas versões a divergirem na próxima edição.
+    const lado = excesso >= 0 ? "acima" : "abaixo";
+    selo.className = `selo-comparacao ${lado}`;
     selo.title = `Carteira ${c.carteira_percentual}% · ${nomeBench} ${c.benchmark_percentual}%`;
-    selo.hidden = false;
+    mostrarSe(selo, `${pct(excesso / 100, 2)} ${lado} ${artigo(nomeBench)} ${nomeBench}`);
   } else {
     selo.hidden = true;
   }
@@ -630,6 +634,15 @@ $("#periodo").addEventListener("change", () => {
 });
 
 /* ═══ Proventos ═══ */
+
+/* O artigo é dado, não condicional.
+
+   O texto dizia "acima do Selic" -- a Selic é feminina. Um `if nome ===
+   "Selic"` resolveria hoje e seria esquecido no próximo indexador; uma tabela
+   diz o que fazer com cada nome, e o que não estiver nela cai no masculino,
+   que é o caso comum. */
+const ARTIGO_DO_INDEXADOR = { Selic: "da" };
+const artigo = (nome) => ARTIGO_DO_INDEXADOR[nome] ?? "do";
 
 const ROTULO_TIPO = {
   dividendo: "Dividendo",
@@ -724,16 +737,14 @@ async function carregarProventos() {
   // O aviso existe porque o número pode estar até 15% acima do real: o Yahoo
   // não distingue dividendo de JCP, e JCP tem retenção na fonte. Exibir um
   // total com falsa precisão seria pior do que exibir a ressalva.
-  if (dados.sem_classificacao > 0) {
-    const n = dados.sem_classificacao;
-    aviso.textContent =
+  const n = dados.sem_classificacao;
+  mostrarSe(
+    aviso,
+    n > 0 &&
       `${n} provento${n > 1 ? "s" : ""} sem classificação: o fornecedor não ` +
-      "informa se foi dividendo ou JCP. Se for JCP, há 15% de imposto retido " +
-      "que ainda não está descontado.";
-    aviso.hidden = false;
-  } else {
-    aviso.hidden = true;
-  }
+        "informa se foi dividendo ou JCP. Se for JCP, há 15% de imposto retido " +
+        "que ainda não está descontado."
+  );
 
   for (const p of dados.proventos) {
     const tr = el("tr");
@@ -1168,16 +1179,14 @@ function renderPlano(plano) {
   }
 
   const aviso = $("#reb-aviso");
-  if (plano.sem_preco.length) {
-    // Omitir em silêncio seria pior: a pessoa acharia que o plano cobre a
-    // carteira inteira, e ela não cobre.
-    aviso.textContent =
+  // Omitir em silêncio seria pior: a pessoa acharia que o plano cobre a
+  // carteira inteira, e ela não cobre.
+  mostrarSe(
+    aviso,
+    plano.sem_preco.length &&
       `Fora do plano por falta de cotação: ${plano.sem_preco.join(", ")}. ` +
-      "Sem preço não dá para saber quantas ações comprar.";
-    aviso.hidden = false;
-  } else {
-    aviso.hidden = true;
-  }
+        "Sem preço não dá para saber quantas ações comprar."
+  );
 }
 
 /* ═══ Projeção (Monte Carlo) ═══ */

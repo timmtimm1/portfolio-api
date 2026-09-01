@@ -38,6 +38,18 @@ ETFS_CONHECIDOS = frozenset(
 _TICKER_VALIDO = re.compile(r"^[A-Z][A-Z0-9]{3}\d{1,2}$")
 _SUFIXO_TIPO = re.compile(r"\d{1,2}$")
 
+# O sufixo diz o tipo. Tabela em vez de cadeia de `if` porque isto E uma
+# tabela: a B3 publica esse mapeamento, e ler os pares aqui e mais rapido do
+# que seguir cinco desvios. Adicionar um sufixo novo vira uma linha de dado,
+# nao um ramo de codigo.
+SUFIXO_AMBIGUO = "11"
+_TIPO_POR_SUFIXO: dict[str, AssetType] = {
+    # 3 = ordinaria; 4 a 8 = preferenciais (PN, PNA, PNB...)
+    **{d: AssetType.ACAO for d in "345678"},
+    # 31 a 39 = BDR
+    **{str(n): AssetType.BDR for n in range(31, 40)},
+}
+
 
 def normalizar_ticker(bruto: str) -> str:
     """ "petr4.sa" -> "PETR4".
@@ -72,16 +84,23 @@ def classificar(ticker: str, setor: str | None = None) -> AssetType:
     encontrado = _SUFIXO_TIPO.search(ticker)
     if encontrado is None:
         return AssetType.OUTRO
-    digitos = encontrado.group()
 
-    if digitos in {"3", "4", "5", "6", "7", "8"}:
-        return AssetType.ACAO
-    if digitos == "11":
-        if ticker in ETFS_CONHECIDOS:
-            return AssetType.ETF
-        if setor and "real estate" in setor.lower():
-            return AssetType.FII
-        return AssetType.UNIT
-    if len(digitos) == 2 and digitos.startswith("3"):
-        return AssetType.BDR
-    return AssetType.OUTRO
+    digitos = encontrado.group()
+    if digitos == SUFIXO_AMBIGUO:
+        return _desambiguar_onze(ticker, setor)
+    return _TIPO_POR_SUFIXO.get(digitos, AssetType.OUTRO)
+
+
+def _desambiguar_onze(ticker: str, setor: str | None) -> AssetType:
+    """O sufixo 11 nao diz o tipo: unit, FII e ETF usam o mesmo numero.
+
+    A ordem das tentativas E a regra, e por isso continua sendo uma sequencia
+    de `if` e nao uma tabela: lista curada de ETFs primeiro (a mais confiavel),
+    depois o setor vindo do fornecedor, e o que sobra e unit. Inverter a ordem
+    mudaria a classificacao de papeis reais.
+    """
+    if ticker in ETFS_CONHECIDOS:
+        return AssetType.ETF
+    if setor and "real estate" in setor.lower():
+        return AssetType.FII
+    return AssetType.UNIT
