@@ -84,6 +84,11 @@ async def gravar_de_todos(
         db, provedor, sorted(tickers), ttl_segundos=ttl_segundos
     )
 
+    # Rede de seguranca para o ativo que o fornecedor nao devolveu: o ultimo
+    # fechamento gravado. Mesmo motivo do backfill -- cair no custo produz uma
+    # queda ficticia que o retorno acumulado nunca mais desfaz.
+    ultimos_fechamentos = await _ultimos_fechamentos(db, tickers)
+
     linhas = []
     for carteira, abertas, realizado in por_carteira:
         if not abertas and realizado == ZERO:
@@ -96,11 +101,16 @@ async def gravar_de_todos(
         for posicao in abertas:
             custo += posicao.custo_total
             cotacao = cotacoes.get(posicao.ticker)
-            if cotacao is None:
-                sem_cotacao += 1
-                valor += posicao.custo_total  # sem preco, entra pelo custo
-            else:
+            if cotacao is not None:
                 valor += posicao.quantidade * cotacao.preco
+                continue
+
+            sem_cotacao += 1
+            anterior = ultimos_fechamentos.get(posicao.ticker)
+            # Sem cotacao E sem fechamento anterior, so resta o custo -- e ai
+            # ele e o melhor palpite disponivel, nao uma escolha ruim. Acontece
+            # com ativo comprado hoje, cujo historico ainda nao existe.
+            valor += posicao.quantidade * anterior if anterior else posicao.custo_total
 
         linhas.append(
             {
@@ -176,6 +186,28 @@ async def historico(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def _ultimos_fechamentos(db: AsyncSession, tickers: set[str]) -> dict[str, Decimal]:
+    """O fechamento mais recente de cada ticker, seja de que dia for.
+
+    `DISTINCT ON` do Postgres: uma consulta so, sem laco e sem subconsulta por
+    ativo. Serve de rede quando o fornecedor de cotacao nao responde por um
+    papel especifico.
+    """
+    if not tickers:
+        return {}
+
+    linhas = (
+        await db.execute(
+            select(Asset.ticker, PriceHistory.close)
+            .join(PriceHistory, PriceHistory.asset_id == Asset.id)
+            .where(Asset.ticker.in_(tickers))
+            .distinct(Asset.ticker)
+            .order_by(Asset.ticker, PriceHistory.date.desc())
+        )
+    ).all()
+    return {ticker: close for ticker, close in linhas}
+
+
 async def backfill(
     db: AsyncSession, carteira: Portfolio, *, desde: date_type, ate: date_type | None = None
 ) -> int:
@@ -246,6 +278,36 @@ async def backfill(
     eventos = await split_service.dos_ativos(db, {t.asset_id for t in transacoes})
     ajustadas = split.ajustar(transacoes, eventos)
 
+    # Ultimo fechamento conhecido de cada ativo, atualizado dia a dia.
+    #
+    # ## Por que carregar o preco anterior em vez de cair no custo
+    #
+    # Um dia sem fechamento nao significa que o ativo passou a valer o que
+    # custou -- significa que nao houve informacao nova.
+    #
+    # Isso aconteceu de verdade nesta base: em 10/08/2026, uma segunda-feira,
+    # `price_history` tinha 44 dos 151 ativos. A carteira registrou -21,3% e,
+    # no dia seguinte, +23,6%. Nada quebrou e nenhum teste falhou -- o grafico
+    # so ficou com um "V" no meio.
+    #
+    # ## O que o "V" estraga, e o que NAO estraga
+    #
+    # O retorno acumulado NAO fica errado: o TWR e um produto de razoes, entao
+    # (a/b) x (c/a) = c/b e o valor intermediario se cancela. Vale dizer isso
+    # porque a intuicao aponta para o lado contrario.
+    #
+    # O que fica errado:
+    #
+    #   - a VOLATILIDADE, que e desvio-padrao dos retornos diarios. Dois dias
+    #     de +-22% num periodo de 72 levam a vol anualizada de 5,5% para 59,9%
+    #   - a MAIOR QUEDA (maximum drawdown), que passa a reportar -21,3%
+    #   - o retorno do dia, se a lacuna cair no ULTIMO dia da serie: ali nao ha
+    #     perna de recuperacao para cancelar, e a tela mostra -21,3% ate a
+    #     cotacao do dia seguinte chegar
+    #
+    # Carregar o ultimo preco e o que qualquer serie financeira faz com lacuna.
+    ultimo_preco: dict[str, Decimal] = {}
+
     for dia in dias:
         # Recalcula a posicao com o livro ATE aquele dia, nao o livro inteiro.
         ate_o_dia = [t for t in ajustadas if t.traded_at <= dia]
@@ -256,16 +318,29 @@ async def backfill(
         if not abertas:
             continue
 
+        # Atualiza o ultimo preco conhecido ANTES de valorizar o dia.
+        for posicao in abertas:
+            fechamento = fechamentos.get((posicao.ticker, dia))
+            if fechamento is not None:
+                ultimo_preco[posicao.ticker] = fechamento
+
+        # Ativo que nunca teve preco ate aqui nao da para valorizar. O dia
+        # inteiro e PULADO -- registrar a carteira com um valor inventado seria
+        # pior que nao ter o ponto, e o TWR lida bem com lacuna (o retorno do
+        # proximo dia e medido contra o ultimo dia valido).
+        if any(p.ticker not in ultimo_preco for p in abertas):
+            continue
+
         custo = valor = ZERO
         sem_cotacao = 0
         for posicao in abertas:
             custo += posicao.custo_total
-            preco = fechamentos.get((posicao.ticker, dia))
-            if preco is None:
+            if (posicao.ticker, dia) not in fechamentos:
+                # Preco veio de um dia anterior: o valor esta correto, mas e
+                # defasado. Contar aqui mantem o campo dizendo "quantos ativos
+                # nao tiveram fechamento proprio neste dia".
                 sem_cotacao += 1
-                valor += posicao.custo_total
-            else:
-                valor += posicao.quantidade * preco
+            valor += posicao.quantidade * ultimo_preco[posicao.ticker]
 
         linhas.append(
             {

@@ -434,3 +434,171 @@ class TestHistoricoAcompanhaOLivro:
 
         pontos = (await client.get("/portfolio/snapshots?limit=500", headers=h)).json()
         assert min(p["date"] for p in pontos) == "2026-01-15"
+
+
+class TestLacunaNoHistorico:
+    """Um dia sem fechamento não pode virar uma queda fictícia.
+
+    Bug real desta base: em 10/08/2026 o `price_history` tinha 44 dos 151
+    ativos. A carteira registrou −21,3% e no dia seguinte +23,6%.
+
+    O retorno ACUMULADO não fica errado -- o TWR é um produto de razões, então
+    o valor intermediário se cancela. O que fica errado é a volatilidade (de
+    5,5% para 59,9% anualizada), a maior queda do período, e o retorno do dia
+    quando a lacuna cai no ÚLTIMO dia da série, onde não há perna de
+    recuperação para cancelar.
+
+    Dia sem fechamento não significa que o ativo passou a valer o que custou --
+    significa que não houve informação nova.
+
+    Os testes usam DOIS ativos de propósito, como no caso real: o dia só entra
+    na série se algum ativo teve fechamento. Com um ativo só, a lacuna faz o
+    dia inteiro sumir, e o bug nem aparece.
+    """
+
+    @staticmethod
+    async def _cenario(client: AsyncClient, db: AsyncSession):
+        """PETR4 com fechamento nos 3 dias; ITUB4 sem o dia do meio."""
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models.asset import PriceHistory
+
+        petr = await criar_ativo(db, ticker="PETR4")
+        itub = await criar_ativo(db, ticker="ITUB4")
+        email, h = await usuario_logado(client)
+        carteira = await carteira_de(db, email)
+        base = date(2026, 8, 10)
+
+        for ticker, preco in (("PETR4", "10.00"), ("ITUB4", "10.00")):
+            await client.post(
+                "/transactions",
+                json=op(ticker=ticker, quantity="100", price=preco, traded_at=base.isoformat()),
+                headers=h,
+            )
+
+        for i in (0, 1, 2):
+            db.add(
+                PriceHistory(
+                    asset_id=petr.id,
+                    date=base + timedelta(days=i),
+                    close=Decimal("10.00"),
+                    volume=1,
+                )
+            )
+        for i in (0, 2):  # o dia 1 do ITUB4 falta de propósito
+            db.add(
+                PriceHistory(
+                    asset_id=itub.id,
+                    date=base + timedelta(days=i),
+                    close=Decimal("20.00"),
+                    volume=1,
+                )
+            )
+        await db.commit()
+        return carteira, base
+
+    async def test_carrega_o_preco_anterior_em_vez_do_custo(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        from datetime import timedelta
+
+        from app.services import snapshot_service
+
+        carteira, base = await self._cenario(client, db)
+        await snapshot_service.backfill(db, carteira, desde=base, ate=base + timedelta(days=2))
+
+        snaps = {
+            s.date: s
+            for s in (
+                await db.execute(
+                    select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == carteira.id)
+                )
+            )
+            .scalars()
+            .all()
+        }
+
+        # PETR4: 100 x 10 = 1.000. ITUB4: 100 x 20 = 2.000. Total 3.000.
+        # No dia do meio o ITUB4 não tem fechamento. Com o comportamento antigo
+        # ele entraria pelo custo (100 x 10 = 1.000) e o total cairia para
+        # 2.000 -- uma queda de 33% que nunca aconteceu.
+        assert snaps[base].valor_mercado == 3000
+        assert snaps[base + timedelta(days=1)].valor_mercado == 3000
+        assert snaps[base + timedelta(days=2)].valor_mercado == 3000
+
+    async def test_o_dia_defasado_fica_marcado(self, client: AsyncClient, db: AsyncSession) -> None:
+        """O valor está certo, mas veio de um fechamento anterior. O campo
+        continua dizendo quantos ativos não tiveram preço próprio no dia."""
+        from datetime import timedelta
+
+        from app.services import snapshot_service
+
+        carteira, base = await self._cenario(client, db)
+        await snapshot_service.backfill(db, carteira, desde=base, ate=base + timedelta(days=2))
+
+        meio = await db.get(PortfolioSnapshot, (carteira.id, base + timedelta(days=1)))
+        assert meio is not None
+        assert meio.ativos_sem_cotacao == 1
+        assert meio.ativos == 2
+
+    async def test_lacuna_no_ultimo_dia_nao_inventa_queda(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O caso em que o erro NÃO se cancela.
+
+        No meio da série, a queda fictícia é desfeita pela alta do dia
+        seguinte. No último dia não há dia seguinte: a tela mostraria −33% até
+        a cotação chegar. É o pior momento possível para um número errado --
+        é justamente o que a pessoa olha quando abre o app.
+        """
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models.asset import PriceHistory
+        from app.services import snapshot_service
+        from app.services.benchmark_service import curva_rentabilidade
+
+        petr = await criar_ativo(db, ticker="PETR4")
+        itub = await criar_ativo(db, ticker="ITUB4")
+        email, h = await usuario_logado(client)
+        carteira = await carteira_de(db, email)
+        base = date(2026, 8, 10)
+
+        for ticker in ("PETR4", "ITUB4"):
+            await client.post(
+                "/transactions",
+                json=op(ticker=ticker, quantity="100", price="10.00", traded_at=base.isoformat()),
+                headers=h,
+            )
+        for i in (0, 1):
+            db.add(
+                PriceHistory(
+                    asset_id=petr.id,
+                    date=base + timedelta(days=i),
+                    close=Decimal("10.00"),
+                    volume=1,
+                )
+            )
+        # ITUB4 só tem o primeiro dia: a lacuna fica na PONTA da série.
+        db.add(PriceHistory(asset_id=itub.id, date=base, close=Decimal("20.00"), volume=1))
+        await db.commit()
+
+        await snapshot_service.backfill(db, carteira, desde=base, ate=base + timedelta(days=1))
+
+        snaps = sorted(
+            (
+                await db.execute(
+                    select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == carteira.id)
+                )
+            )
+            .scalars()
+            .all(),
+            key=lambda s: s.date,
+        )
+        assert len(snaps) == 2
+        # Preços estáveis: o último dia vale o mesmo que o primeiro. Com o
+        # custo, valeria 2.000 em vez de 3.000 -- uma queda de 33% inventada,
+        # e sem nenhum dia seguinte para desfazê-la.
+        assert snaps[-1].valor_mercado == 3000
+        assert curva_rentabilidade(snaps, {}).pop().carteira == Decimal(0)
