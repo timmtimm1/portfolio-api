@@ -200,10 +200,17 @@ function limpar(node) { while (node.firstChild) node.removeChild(node.firstChild
 
 /* ═══ Login ═══ */
 
+let relogioDaDemo = null;
+
 function mostrarLogin() {
   $("#login").hidden = false;
   $("#app").hidden = true;
   token = null;
+  // Para o contador da demonstração. Sem isto ele continuaria rodando sobre um
+  // elemento escondido e, ao vencer, chamaria esta mesma função de novo --
+  // derrubando para a tela de login alguém que já entrou em outra conta.
+  clearInterval(relogioDaDemo);
+  $("#aviso-demo").hidden = true;
 }
 
 function comCarteira(caminho) {
@@ -257,9 +264,73 @@ async function entrarNoApp() {
   $("#avatar").textContent = eu.email.slice(0, 2).toUpperCase();
   await carregarVisao();
 
+  marcarDemo(eu);
+
   $("#login").hidden = true;
   $("#app").hidden = false;
 }
+
+// ══ MODO DEMONSTRAÇÃO ══
+
+function restanteEmTexto(fim) {
+  const segundos = Math.max(0, Math.floor((fim - Date.now()) / 1000));
+  const h = Math.floor(segundos / 3600);
+  const m = Math.floor((segundos % 3600) / 60);
+  // Sem segundos acima de um minuto: um contador piscando a cada segundo puxa
+  // o olho para o relógio em vez da carteira, que é o que a pessoa veio ver.
+  if (h > 0) return `${h}h${String(m).padStart(2, "0")}`;
+  if (m > 0) return `${m} min`;
+  return `${segundos}s`;
+}
+
+function marcarDemo(usuario) {
+  clearInterval(relogioDaDemo);
+  const aviso = $("#aviso-demo");
+  aviso.hidden = !usuario.is_demo;
+  if (!usuario.is_demo || !usuario.expires_at) return;
+
+  // O e-mail sintético (demo-a1f3…@demo.invalid) não diz nada a ninguém e
+  // ocupa o lugar onde a pessoa espera se reconhecer.
+  $("#usuario-email").textContent = "Visitante";
+  $("#avatar").textContent = "VC";
+
+  const fim = new Date(usuario.expires_at).getTime();
+  const tique = () => {
+    $("#demo-restante").textContent = restanteEmTexto(fim);
+    // Quando vence, o backend já recusa tudo com 401. Avisar aqui evita que a
+    // pessoa descubra pelo erro de uma ação que ela tentou fazer.
+    if (fim <= Date.now()) {
+      clearInterval(relogioDaDemo);
+      mostrarLogin();
+    }
+  };
+  tique();
+  relogioDaDemo = setInterval(tique, 30_000);
+}
+
+$("#btn-demo").addEventListener("click", async () => {
+  const erro = $("#login-erro");
+  erro.hidden = true;
+  const botao = $("#btn-demo");
+  botao.disabled = true;
+  botao.textContent = "Preparando a carteira…";
+  try {
+    // Sem corpo e sem credencial: a conta é criada e autenticada no mesmo passo.
+    const r = await fetch(`${API}/auth/demo`, { method: "POST" });
+    if (!r.ok) {
+      if (r.status === 429) throw new Error("Muitas demonstrações agora há pouco. Tente em um minuto.");
+      throw new Error(await mensagemDeFalha(r));
+    }
+    token = (await r.json()).access_token;
+    await entrarNoApp();
+  } catch (e) {
+    erro.textContent = e.message;
+    erro.hidden = false;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Ver demonstração";
+  }
+});
 
 $("#form-login").addEventListener("submit", async (ev) => {
   ev.preventDefault();

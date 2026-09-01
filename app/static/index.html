@@ -33,6 +33,13 @@
     <p class="erro" id="login-erro" role="alert" hidden></p>
     <button class="btn btn--primario" type="submit" id="btn-entrar">Entrar</button>
     <p class="login-rodape">Não tem conta? <button type="button" class="link" id="btn-criar">Criar agora</button></p>
+
+    <!-- Entrada sem cadastro. Fica DEPOIS do formulário e com peso visual menor:
+         quem já tem conta veio para entrar, e o caminho principal não pode
+         competir com o secundário. Para quem chegou de um link, é o atalho. -->
+    <div class="login-ou"><span>ou</span></div>
+    <button type="button" class="btn btn--fantasma btn--demo" id="btn-demo">Ver demonstração</button>
+    <p class="login-nota">Carteira de exemplo, sem cadastro. Você pode lançar e apagar operações à vontade — ela expira em 2 horas.</p>
   </form>
 </div>
 
@@ -43,6 +50,21 @@
     <div class="marca">
       <span class="marca-icone" aria-hidden="true"></span>
       <span>Portfolio</span>
+    </div>
+
+    <!-- Aviso de demonstração. Fica no TOPO da lateral, e não no rodapé dela:
+         a barra lateral é fixa e não rola junto com a página, então qualquer
+         coisa embaixo do cartão do Markowitz desaparece em janela baixa. Um
+         aviso abaixo da dobra não avisa ninguém.
+
+         E é permanente, não um toast que some: quem larga a aba por uma hora e
+         volta precisa continuar sabendo que estes números são de exemplo. O
+         contador existe porque "expira em 2 horas" sem referência não diz
+         quanto ainda resta. -->
+    <div class="aviso-demo" id="aviso-demo" hidden>
+      <strong>Modo demonstração</strong>
+      <p>Carteira de exemplo. Nada aqui é uma posição real.</p>
+      <p class="aviso-demo-prazo">Expira em <span id="demo-restante">—</span></p>
     </div>
 
     <p class="lateral-titulo">Carteira</p>

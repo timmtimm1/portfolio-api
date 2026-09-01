@@ -645,3 +645,43 @@ h1, h2, h3, p { margin: 0; }
   border-radius: 0 var(--r-s) var(--r-s) 0;
 }
 .proj-frase b { color: var(--violeta-2); }
+
+/* ══ ENTRADA POR DEMONSTRAÇÃO ══ */
+
+/* Separador "ou". A linha é desenhada com dois gradientes que morrem nas pontas
+   em vez de um border sólido: encostar uma régua reta na borda do cartão
+   competiria com ele. */
+.login-ou {
+  display: flex; align-items: center; gap: .75rem;
+  margin: .25rem 0; color: var(--txt-3);
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .08em;
+}
+.login-ou::before, .login-ou::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--borda-forte), transparent);
+}
+
+.btn--demo { width: 100%; }
+
+.login-nota {
+  margin: .1rem 0 0; text-align: center;
+  color: var(--txt-3); font-size: .78rem; line-height: 1.5;
+}
+
+/* Aviso permanente na barra lateral. Ouro, não vermelho: não há nada errado
+   acontecendo -- é um estado, e vermelho num painel financeiro já significa
+   prejuízo. */
+.aviso-demo {
+  border: 1px solid rgba(245, 181, 74, .3);
+  background: rgba(245, 181, 74, .08);
+  border-radius: var(--r-s);
+  padding: .7rem .8rem;
+  margin-bottom: 1rem;
+}
+.aviso-demo strong {
+  display: block; color: var(--ouro);
+  font-size: .8rem; letter-spacing: .02em; margin-bottom: .25rem;
+}
+.aviso-demo p { margin: 0; color: var(--txt-2); font-size: .75rem; line-height: 1.45; }
+.aviso-demo-prazo { margin-top: .35rem !important; color: var(--txt-3) !important; }
+.aviso-demo-prazo span { color: var(--ouro); font-variant-numeric: tabular-nums; }
