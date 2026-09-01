@@ -36,6 +36,34 @@ config.set_main_option(
 target_metadata = Base.metadata
 
 
+def include_object(
+    objeto: object, nome: str | None, tipo: str, reflected: bool, comparar_com: object
+) -> bool:
+    """Tira os CHECK da comparacao do autogenerate.
+
+    ## Por que, com nome e sobrenome
+
+    O autogenerate NAO enxerga os CHECK que nascem de `Enum(create_constraint=
+    True)`: eles sao emitidos na hora do DDL e nao entram no metadata da forma
+    que a comparacao espera. Resultado: ele le seis restricoes no banco, nao
+    acha nenhuma no modelo, e conclui que todas sobram.
+
+    Isso nao e cosmetico. Duas vezes num mesmo dia o `--autogenerate` produziu
+    `drop_constraint` para as seis -- e aplicar o arquivo como veio teria
+    deixado `transactions.side` aceitando qualquer string, sem erro nenhum. Um
+    detector de drift que grita sem motivo e um detector que se aprende a
+    ignorar; um que gera DDL destrutivo e pior que nao ter detector.
+
+    ## O preco disto
+
+    Mudanca em CHECK deixa de ser detectada e passa a ser escrita a mao (foi o
+    que ja fizemos em `091c1a39886d` e `bc35731d22ea`). Em troca, `alembic
+    check` volta a ser confiavel para tabela, coluna, tipo, indice e chave
+    estrangeira -- que e onde o drift silencioso realmente acontece.
+    """
+    return not (tipo == "check_constraint")
+
+
 def run_migrations_offline() -> None:
     """Gera o SQL sem conectar (`alembic upgrade head --sql`).
 
@@ -48,6 +76,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -69,6 +98,7 @@ def run_migrations_online() -> None:
             # e voce descobre no runtime, com dado truncado.
             compare_type=True,
             compare_server_default=True,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()
