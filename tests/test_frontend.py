@@ -308,3 +308,52 @@ class TestMarcaDePosicaoAjustada:
     def test_o_estilo_do_marcador_existe(self) -> None:
         css = (ESTATICOS / "style.css").read_text()
         assert ".marca-evento" in css
+
+
+class TestBotaoDeApagarCarteira:
+    """A exclusão de carteira existia na API e não existia na tela.
+
+    É destrutiva de verdade -- leva o livro e todo o histórico --, então os
+    testes aqui guardam as duas decisões que impedem o pior desfecho: não
+    oferecer o botão onde ele não deve existir, e não perguntar de forma vaga.
+    """
+
+    def test_o_botao_existe(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="btn-apagar-carteira"' in html
+
+    def test_nasce_escondido(self) -> None:
+        """A primeira carteira que abre é a real, onde o botão não vale. Nascer
+        visível o mostraria por um instante antes de o JS corrigir."""
+        html = (ESTATICOS / "index.html").read_text()
+        trecho = html[html.index('id="btn-apagar-carteira"') :][:300]
+        assert "hidden" in trecho
+
+    def test_so_aparece_em_carteira_simulada(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert '$("#btn-apagar-carteira").hidden = !atual || atual.tipo !== "simulada"' in js
+
+    def test_a_tela_tambem_recusa_apagar_a_real(self) -> None:
+        """Defesa em profundidade: o backend devolve 409, e o handler nem
+        chega a chamar. Uma das duas falhando, a outra segura."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index('$("#btn-apagar-carteira").addEventListener') :][:400]
+        assert 'atual.tipo !== "simulada"' in trecho and "return" in trecho
+
+    def test_confirma_antes_de_apagar(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index('$("#btn-apagar-carteira").addEventListener') :]
+        fim = trecho.index('$("#btn-nova-carteira")')
+        handler = trecho[:fim]
+        assert "confirm(" in handler, "exclusao destrutiva sem confirmacao"
+        # A confirmação precisa vir ANTES do DELETE, não depois.
+        assert handler.index("confirm(") < handler.index('method: "DELETE"')
+
+    def test_a_confirmacao_diz_o_que_sera_perdido(self) -> None:
+        """ "Tem certeza?" genérico não informa nada -- a pessoa clica em OK por
+        reflexo. A mensagem precisa contar quantas operações e quantos dias de
+        histórico somem."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index('$("#btn-apagar-carteira").addEventListener') :][:2000]
+        assert "operação" in trecho and "histórico" in trecho
+        assert "desfazer" in trecho

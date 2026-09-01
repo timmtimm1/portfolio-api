@@ -540,3 +540,23 @@ h1, h2, h3, p { margin: 0; }
   cursor: help;
   vertical-align: middle;
 }
+
+/* Lixeira da carteira. Fica escondida na carteira real -- ela nao pode ser
+   apagada, e um botao desabilitado convidaria a tentar. A cor so aparece no
+   hover: exclusao destrutiva nao precisa gritar em repouso, precisa ser
+   inequivoca no momento do clique. */
+.seletor-carteira .btn-perigo {
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, .05);
+  color: var(--txt-3);
+  transition: background .16s, color .16s;
+}
+.seletor-carteira .btn-perigo:hover {
+  background: rgba(251, 113, 133, .16);
+  color: var(--vermelho);
+}
+.seletor-carteira .btn-perigo svg {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}

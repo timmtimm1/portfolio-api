@@ -225,3 +225,62 @@ class TestAutorizacao:
         assert (await client.get("/portfolios")).status_code == 401
         assert (await client.post("/portfolios", json={"nome": "X"})).status_code == 401
         assert (await client.delete(f"/portfolios/{uuid.uuid4()}")).status_code == 401
+
+
+class TestProtecaoDaCarteiraReal:
+    """A carteira real não pode ser apagada.
+
+    Ela é criada sozinha, é o padrão do sistema e é a que abre selecionada --
+    ou seja, a mais fácil de apagar sem querer. A exclusão é destrutiva de
+    verdade: leva o livro inteiro e todo o histórico de snapshots.
+
+    A regra vive no domínio, não no botão. Estes testes batem na API direto,
+    que é exatamente por onde um guard só de interface seria contornado.
+    """
+
+    async def test_apagar_a_real_devolve_409(self, client: AsyncClient) -> None:
+        _, h = await usuario_logado(client)
+        carteiras = (await client.get("/portfolios", headers=h)).json()
+        real = next(c for c in carteiras if c["tipo"] == "real")
+
+        resp = await client.delete(f"/portfolios/{real['id']}", headers=h)
+
+        # 409, e não 404 nem 403: ela existe, é sua, e mesmo assim é recusada.
+        assert resp.status_code == 409
+        assert "real" in resp.json()["detail"].lower()
+
+    async def test_a_real_continua_la_depois_da_tentativa(self, client: AsyncClient) -> None:
+        _, h = await usuario_logado(client)
+        real = next(
+            c for c in (await client.get("/portfolios", headers=h)).json() if c["tipo"] == "real"
+        )
+        await client.delete(f"/portfolios/{real['id']}", headers=h)
+
+        depois = (await client.get("/portfolios", headers=h)).json()
+        assert any(c["id"] == real["id"] for c in depois)
+
+    async def test_as_transacoes_da_real_sobrevivem(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O que a proteção existe para salvar: o livro de verdade."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(ticker="PETR4"), headers=h)
+        real = next(
+            c for c in (await client.get("/portfolios", headers=h)).json() if c["tipo"] == "real"
+        )
+
+        await client.delete(f"/portfolios/{real['id']}", headers=h)
+
+        assert (await client.get("/transactions", headers=h)).json()["total"] == 1
+
+    async def test_simulada_continua_apagavel(self, client: AsyncClient) -> None:
+        """A proteção não pode virar uma trava geral: simulação descartada é
+        justamente o caso de uso do botão."""
+        _, h = await usuario_logado(client)
+        simulada = await _nova(client, h, "Descartavel")
+
+        assert (await client.delete(f"/portfolios/{simulada}", headers=h)).status_code == 204
+        assert not any(
+            c["id"] == simulada for c in (await client.get("/portfolios", headers=h)).json()
+        )

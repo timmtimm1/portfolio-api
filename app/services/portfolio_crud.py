@@ -27,6 +27,19 @@ class LimiteDeCarteirasError(DomainError):
     pass
 
 
+class CarteiraRealNaoApagavelError(DomainError):
+    """A carteira real nao pode ser excluida.
+
+    Ela e criada sozinha, e o padrao do sistema e a que abre selecionada --
+    ou seja, a mais facil de apagar sem querer. E a exclusao e destrutiva de
+    verdade: leva junto o livro inteiro e todo o historico de snapshots.
+
+    A protecao mora AQUI, e nao so no botao. Esconder a lixeira na tela nao
+    protege nada: quem chamar a API direto, ou um dia em que a interface tiver
+    um defeito, passa por cima. Regra de dominio se defende no dominio.
+    """
+
+
 async def listar(db: AsyncSession, user_id: uuid.UUID) -> list[Portfolio]:
     """A real primeiro, depois as simuladas por nome.
 
@@ -130,10 +143,18 @@ async def remover(db: AsyncSession, user_id: uuid.UUID, portfolio_id: uuid.UUID)
     Diferente do resto do sistema, aqui a exclusao e destrutiva de verdade -- e
     por isso a interface confirma antes. Um `is_active` na carteira so adiaria a
     decisao e encheria o seletor de itens que o usuario ja descartou.
+
+    A carteira REAL e recusada: ver `CarteiraRealNaoApagavelError`. Devolve
+    `False` (e nao levanta) quando a carteira nao existe ou e de outro usuario,
+    para o chamador responder 404 sem distinguir os dois casos.
     """
     carteira = await obter(db, user_id, portfolio_id)
     if carteira is None:
         return False
+    if carteira.tipo is TipoCarteira.REAL:
+        raise CarteiraRealNaoApagavelError(
+            "A carteira real nao pode ser apagada. Ela guarda suas operacoes de verdade."
+        )
     await db.delete(carteira)
     await db.commit()
     return True

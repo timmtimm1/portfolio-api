@@ -222,6 +222,11 @@ async function carregarCarteiras() {
   } else {
     pilula.hidden = true;
   }
+
+  // A lixeira some na carteira real -- ela não pode ser apagada. Some, e não
+  // fica desabilitada: um botão cinza convida a tentar e depois frustra. A
+  // recusa de verdade está no backend (409); isto aqui é só não oferecer.
+  $("#btn-apagar-carteira").hidden = !atual || atual.tipo !== "simulada";
 }
 
 async function entrarNoApp() {
@@ -1107,6 +1112,45 @@ $("#carteira").addEventListener("change", async (ev) => {
   carteiraAtiva = ev.target.value;
   invalidar();
   await carregarCarteiras();
+});
+
+$("#btn-apagar-carteira").addEventListener("click", async () => {
+  const atual = carteiras.find((c) => c.id === carteiraAtiva);
+  if (!atual || atual.tipo !== "simulada") return;
+
+  // A confirmação diz o que vai sumir, com números.
+  //
+  // "Tem certeza?" genérico não informa nada: a pessoa clica em OK por reflexo.
+  // Aqui ela lê quantas operações e quantos dias de histórico está destruindo
+  // antes de decidir -- e a exclusão é definitiva, sem lixeira nem desfazer.
+  let detalhe = "";
+  try {
+    const [ops, snaps] = await Promise.all([
+      api(`/transactions?portfolio_id=${atual.id}&limit=1`),
+      api(`/portfolio/snapshots?portfolio_id=${atual.id}&limit=500`),
+    ]);
+    const n = ops.total;
+    const d = snaps.length;
+    detalhe =
+      `\n\nVocê perde ${n} operação${n === 1 ? "" : "ões"} e ${d} dia${d === 1 ? "" : "s"} ` +
+      "de histórico.";
+  } catch {
+    // Falhar ao contar não pode impedir a exclusão -- só deixa o aviso
+    // genérico. O que não pode é apagar sem perguntar.
+    detalhe = "\n\nIsso apaga todas as operações e todo o histórico dela.";
+  }
+
+  if (!confirm(`Apagar a carteira "${atual.nome}"?${detalhe}\n\nNão dá para desfazer.`)) return;
+
+  try {
+    await api(`/portfolios/${atual.id}`, { method: "DELETE" });
+    carteiraAtiva = null;      // força cair na primeira da lista (a real)
+    await carregarCarteiras();
+    invalidar();
+    await carregarTransacoes();
+  } catch (e) {
+    alert(e.message);
+  }
 });
 
 $("#btn-nova-carteira").addEventListener("click", async () => {

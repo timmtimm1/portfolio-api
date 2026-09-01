@@ -9,7 +9,11 @@ from fastapi import APIRouter, HTTPException, status
 from app.core.deps import CurrentUser, DbDep
 from app.schemas.portfolio_schema import PortfolioCreate, PortfolioRead
 from app.services import portfolio_crud
-from app.services.portfolio_crud import LimiteDeCarteirasError, NomeDeCarteiraEmUsoError
+from app.services.portfolio_crud import (
+    CarteiraRealNaoApagavelError,
+    LimiteDeCarteirasError,
+    NomeDeCarteiraEmUsoError,
+)
 
 router = APIRouter(prefix="/portfolios", tags=["carteiras"])
 
@@ -69,6 +73,15 @@ async def remover(usuario: CurrentUser, db: DbDep, portfolio_id: uuid.UUID) -> N
     o valor de uma simulacao abandonada e zero.
 
     404 para carteira de outro usuario, nunca 403.
+
+    409 para a carteira real: ela nao pode ser apagada. Nao e "nao encontrada"
+    nem "sem permissao" -- ela existe, e sua, e mesmo assim a operacao e
+    recusada. 409 (conflito com o estado do recurso) e o unico codigo que conta
+    essa historia direito.
     """
-    if not await portfolio_crud.remover(db, usuario.id, portfolio_id):
+    try:
+        apagou = await portfolio_crud.remover(db, usuario.id, portfolio_id)
+    except CarteiraRealNaoApagavelError as erro:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(erro)) from erro
+    if not apagou:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carteira nao encontrada")
