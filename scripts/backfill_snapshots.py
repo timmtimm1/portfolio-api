@@ -16,6 +16,7 @@ from datetime import date
 from sqlalchemy import select
 
 from app.core.db import dispose_engine, get_sessionmaker
+from app.models.portfolio import Portfolio
 from app.models.user import User
 from app.services import snapshot_service
 
@@ -35,8 +36,21 @@ async def main() -> int:
             print(f"[backfill] usuario {args.email} nao encontrado", file=sys.stderr)
             return 1
 
-        gravados = await snapshot_service.backfill(db, usuario.id, desde=args.desde, ate=args.ate)
-        print(f"[backfill] {gravados} snapshots reconstruidos para {args.email}")
+        carteiras = (
+            (await db.execute(select(Portfolio).where(Portfolio.user_id == usuario.id)))
+            .scalars()
+            .all()
+        )
+        if not carteiras:
+            print(f"[backfill] {args.email} nao tem carteiras", file=sys.stderr)
+            return 1
+
+        total = 0
+        for carteira in carteiras:
+            gravados = await snapshot_service.backfill(db, carteira, desde=args.desde, ate=args.ate)
+            total += gravados
+            print(f"[backfill] {carteira.nome}: {gravados} snapshots")
+        print(f"[backfill] {total} no total para {args.email}")
 
     await dispose_engine()
     return 0
