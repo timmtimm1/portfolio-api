@@ -7,10 +7,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Query
 
-from app.core.deps import CarteiraAtual, CurrentUser, DbDep, SettingsDep
+from app.core.deps import CarteiraAtual, CurrentUser, DbDep, ProvedorDep, SettingsDep
 from app.schemas.metrics import PortfolioMetrics
 from app.schemas.optimization import OptimizationRequest, OptimizationResponse
-from app.services import metrics_service, optimizer_service
+from app.schemas.rebalance import (
+    DesvioRead,
+    OrdemRead,
+    RebalanceRequest,
+    RebalanceResponse,
+)
+from app.services import metrics_service, optimizer_service, portfolio_service, rebalance
 
 router = APIRouter(tags=["metricas"])
 
@@ -108,4 +114,78 @@ async def otimizar_carteira(
     # os requests -- a armadilha classica do argumento padrao mutavel em Python.
     return await optimizer_service.otimizar(
         db, carteira.id, pedido or OptimizationRequest(), taxa_livre_risco=settings.RISK_FREE_RATE
+    )
+
+
+@router.post(
+    "/portfolio/rebalance",
+    response_model=RebalanceResponse,
+    summary="Traduz pesos-alvo em ordens de compra e venda",
+)
+async def rebalancear(
+    carteira: CarteiraAtual,
+    db: DbDep,
+    provedor: ProvedorDep,
+    settings: SettingsDep,
+    pedido: RebalanceRequest,
+) -> RebalanceResponse:
+    """Do peso ideal para a ordem concreta.
+
+    A fronteira diz "40% em WEGE3". Ninguem compra 40%: compra 12 acoes. Aqui
+    a traducao acontece, com a cotacao de mercado e quantidades inteiras.
+
+    ## Os dois modos
+
+    `permitir_venda=false` distribui apenas o aporte. Nao vende nada, logo nao
+    gera imposto sobre ganho nem realiza prejuizo so para acertar um peso -- e
+    como a maioria das pessoas rebalanceia de verdade.
+
+    `permitir_venda=true` chega exatamente no alvo, vendendo o excedente. Mais
+    preciso, e o plano mostra quanto sera vendido para a pessoa decidir se
+    compensa o custo.
+
+    ## Isto NAO executa nada
+
+    Devolve um plano. Nenhuma transacao e gravada, nenhuma ordem e enviada a
+    corretora -- o app nao tem (nem quer ter) essa integracao. Quem decide e
+    lanca e o usuario.
+    """
+    resumo = await portfolio_service.resumo(
+        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )
+
+    plano = rebalance.planejar(
+        resumo.positions,
+        pedido.pesos,
+        aporte=pedido.aporte,
+        permitir_venda=pedido.permitir_venda,
+    )
+
+    return RebalanceResponse(
+        ordens=[
+            OrdemRead(
+                ticker=o.ticker,
+                side=o.side,
+                quantidade=o.quantidade,
+                preco=o.preco,
+                valor=o.valor,
+            )
+            for o in plano.ordens
+        ],
+        desvios=[
+            DesvioRead(
+                ticker=d.ticker,
+                peso_atual=d.peso_atual,
+                peso_alvo=d.peso_alvo,
+                diferenca=d.diferenca,
+                valor_atual=d.valor_atual,
+            )
+            # Sem posicao e sem alvo nao ha desvio nenhum a mostrar.
+            for d in plano.desvios
+            if d.valor_atual > 0 or d.peso_alvo > 0
+        ],
+        total_compras=plano.total_compras,
+        total_vendas=plano.total_vendas,
+        sobra=plano.sobra,
+        sem_preco=plano.sem_preco,
     )

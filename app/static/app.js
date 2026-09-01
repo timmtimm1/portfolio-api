@@ -539,8 +539,8 @@ function desenharEvolucao(evolucao) {
     rotulos.push(["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]);
 
     if (evolucao.benchmark) {
-      // Alinhamos por DATA, não por posição: o CDI não rende em feriado, então
-      // as séries podem ter comprimentos diferentes. Casar por índice
+      // Alinhamos por DATA, não por posição: o indexador não rende em feriado,
+      // então as séries podem ter comprimentos diferentes. Casar por índice
       // deslocaria a curva inteira sem nenhum erro aparente.
       const porData = new Map(evolucao.benchmark.pontos.map((p) => [p.date, Number(p.valor)]));
       conjuntos.push({
@@ -969,7 +969,7 @@ function renderCarteiras(r) {
 
   const cartoes = [
     ["Mínima variância", "#35d6e8", r.minima_variancia, "Menor risco possível. Não usa retorno esperado — só covariância, que é bem mais estável."],
-    ["Máximo Sharpe", "#ff4fa3", r.maximo_sharpe, "Melhor retorno por unidade de risco, acima do CDI."],
+    ["Máximo Sharpe", "#ff4fa3", r.maximo_sharpe, "Melhor retorno por unidade de risco, acima da taxa livre de risco."],
     ["Sua carteira hoje", "#f5b54a", r.carteira_atual, "Pesos atuais pelo custo, avaliados com os mesmos parâmetros."],
   ];
 
