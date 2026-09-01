@@ -67,7 +67,17 @@ async def get_current_user(
         raise _NAO_AUTORIZADO from None
 
     usuario = await db.get(User, user_id)
-    if usuario is None or not usuario.is_active:
+    # `expirou` fica AQUI, junto de `is_active`, e nao na faxina periodica.
+    #
+    # A faxina apaga a conta quando alguem cria a proxima demo -- pode demorar,
+    # ou nunca acontecer num fim de semana sem visitas. Se a validade dependesse
+    # dela, o refresh token renovaria a demo indefinidamente e as "2 horas"
+    # seriam enfeite.
+    #
+    # Como o usuario e relido do banco a cada request (o paragrafo acima), a
+    # validade passa a valer no primeiro request depois do vencimento, sem
+    # precisar de agendador nenhum.
+    if usuario is None or not usuario.is_active or usuario.expirou:
         raise _NAO_AUTORIZADO
 
     return usuario
@@ -114,7 +124,7 @@ async def get_carteira(
     from app.services import portfolio_crud
 
     if portfolio_id is None:
-        return await portfolio_crud.obter_padrao(db, usuario.id)
+        return await portfolio_crud.obter_padrao(db, usuario)
 
     carteira = await portfolio_crud.obter(db, usuario.id, portfolio_id)
     if carteira is None:
@@ -123,3 +133,26 @@ async def get_carteira(
 
 
 CarteiraAtual = Annotated[Portfolio, Depends(get_carteira)]
+
+
+async def bloquear_demo(usuario: CurrentUser) -> None:
+    """Recusa contas de demonstracao em rotas que gastam cota externa.
+
+    O motivo e economico, nao de seguranca: sincronizar proventos dispara N
+    chamadas ao Yahoo, e a cota e compartilhada por todo o app. Uma conta demo
+    e gratuita, anonima e criada em um clique -- deixar esse botao ligado nela
+    e entregar a cota do fornecedor para qualquer visitante esgotar, derrubando
+    a sincronizacao da carteira de verdade junto.
+
+    A demo nao perde nada com isso: ela nasce com os dados ja populados, entao
+    nao ha o que sincronizar.
+    """
+    if usuario.is_demo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Indisponivel na conta de demonstracao",
+        )
+
+
+# Usado com `dependencies=[...]` nas rotas que consomem cota de fornecedor.
+SemDemo = Depends(bloquear_demo)

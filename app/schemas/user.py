@@ -54,3 +54,10 @@ class UserRead(BaseModel):
     email: EmailStr
     is_active: bool
     created_at: datetime
+
+    # Expostos para a interface conseguir marcar a tela como demonstracao e
+    # mostrar quanto tempo resta. Nao sao segredo: quem esta autenticado numa
+    # conta demo ja sabe que ela e uma demo -- esconder o prazo so produziria
+    # uma sessao que morre sem aviso.
+    is_demo: bool = False
+    expires_at: datetime | None = None

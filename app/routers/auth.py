@@ -12,7 +12,7 @@ from app.core.deps import CurrentUser, DbDep, SettingsDep
 from app.core.rate_limit import limiter
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserRead
-from app.services import auth_service, token_service
+from app.services import auth_service, demo_service, token_service
 from app.services.exceptions import (
     ContaInativaError,
     CredenciaisInvalidasError,
@@ -186,3 +186,42 @@ async def me(usuario: CurrentUser) -> UserRead:
     classica -- aqui ela e impossivel por construcao.
     """
     return UserRead.model_validate(usuario)
+
+
+@router.post(
+    "/demo",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Cria uma conta de demonstracao temporaria e ja autenticada",
+)
+@limiter.limit(get_settings().RATE_LIMIT_DEMO)
+async def demo(
+    # `Request` de verdade: o slowapi le o IP dele, e o FastAPI trataria
+    # qualquer outro tipo como parametro de query.
+    request: Request,
+    response: Response,
+    db: DbDep,
+    settings: SettingsDep,
+) -> TokenResponse:
+    """Abre uma carteira de demonstracao, populada e editavel, sem cadastro.
+
+    Devolve o MESMO par de tokens do login, pelo mesmo caminho. Isso e o ponto
+    central do desenho: nao existe "modo visitante" no resto do app. A conta
+    criada aqui e um usuario comum, e da rota seguinte em diante ela passa pelo
+    `get_current_user` e pelo `get_carteira` como qualquer outro -- herdando o
+    isolamento que ja esta escrito e testado, em vez de abrir uma segunda porta
+    para a camada de dados que precisaria ser auditada do zero.
+
+    A conta expira em `DEMO_VALIDADE_HORAS` e nao tem senha utilizavel: ela vive
+    enquanto durarem os tokens desta resposta, e some depois.
+    """
+    # A faxina roda aqui, e nao num agendador: a limpeza acontece exatamente
+    # quando o volume cresce, sem depender de cron configurado no deploy. Se
+    # ninguem visita, nao ha lixo para recolher.
+    await demo_service.limpar_expiradas(db)
+
+    usuario = await demo_service.criar(db, validade_horas=settings.DEMO_VALIDADE_HORAS)
+
+    access, refresh, expira_em = await token_service.emitir_par(db, usuario, settings)
+    _set_refresh_cookie(response, refresh, settings)
+    return TokenResponse(access_token=access, expires_in=expira_em)

@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from app.core.deps import CarteiraAtual, DbDep, ProvedorDep, SettingsDep, YahooDep
+from app.core.deps import CarteiraAtual, DbDep, ProvedorDep, SemDemo, SettingsDep, YahooDep
 from app.core.rate_limit import limiter
 from app.models.dividend import TipoProvento
 from app.models.transaction import TransactionSide
@@ -253,6 +253,8 @@ async def listar_proventos(
     "/portfolio/dividends/sync",
     response_model=DividendSyncResult,
     summary="Busca proventos dos ativos da carteira no fornecedor",
+    # Fora da demo: esta rota gasta cota do Yahoo, que e compartilhada.
+    dependencies=[SemDemo],
 )
 @limiter.limit("10/hour")
 async def sincronizar_proventos(
