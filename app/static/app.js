@@ -448,6 +448,7 @@ function desenharEvolucao(evolucao) {
   const pontos = evolucao.pontos;
   if (!pontos.length) {
     selo.hidden = true;
+    $("#evolucao-aviso").hidden = true;
     return;
   }
 
@@ -456,6 +457,14 @@ function desenharEvolucao(evolucao) {
   $("#sub-evolucao").textContent = emPct
     ? `Rentabilidade acumulada${nomeBench ? ` × ${nomeBench}` : ""}`
     : `Valor de mercado × custo${nomeBench ? ` × ${nomeBench}` : ""}`;
+
+  // `motivo` só vem preenchido quando um indexador FOI pedido e a comparação
+  // falhou (BCB fora do ar, ou -- caso comum do IPCA -- o mês ainda não foi
+  // publicado). Gráfico sem a linha de comparação e sem explicação nenhuma
+  // parece defeito do sistema; a API já manda o motivo, faltava a tela ler.
+  const aviso = $("#evolucao-aviso");
+  aviso.textContent = evolucao.motivo || "";
+  aviso.hidden = !evolucao.motivo;
 
   const conjuntos = [];
   const rotulos = [];

@@ -215,3 +215,31 @@ class TestFormatoDeData:
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         assert 'brParaISO($("#op-data").value)' in js
         assert 'traded_at: $("#op-data").value' not in js
+
+
+class TestAvisoDeComparacaoFalha:
+    """A API manda `motivo` quando o indexador foi pedido e a comparacao falhou
+    (BCB fora do ar, ou o mes do IPCA ainda nao publicado). O campo existia na
+    resposta e nunca era lido: quem escolhia "vs IPCA" numa carteira recente via
+    a carteira sozinha, sem nenhuma explicacao de por que a linha de comparacao
+    nao apareceu -- e isso parece defeito do sistema, nao uma situacao normal.
+    """
+
+    def test_o_campo_motivo_da_evolucao_e_lido(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "evolucao.motivo" in js, (
+            "`EvolutionResponse.motivo` existe na API e precisa ser mostrado "
+            "quando a comparacao pedida falhar -- sem isso a tela fica muda"
+        )
+
+    def test_existe_um_elemento_para_mostrar_o_aviso(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="evolucao-aviso"' in html
+
+    def test_o_aviso_fica_escondido_quando_nao_ha_motivo(self) -> None:
+        """Regressao pontual: `aviso.hidden = !evolucao.motivo` cobre tanto
+        `null` (comparacao ok, ou "sem comparacao" escolhido de proposito)
+        quanto string vazia -- um `= evolucao.motivo` sozinho, sem negar,
+        deixaria o aviso visivel com texto vazio toda vez que desse certo."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "aviso.hidden = !evolucao.motivo" in js
