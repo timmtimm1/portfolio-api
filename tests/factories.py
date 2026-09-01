@@ -142,4 +142,4 @@ async def carteira_de(db: AsyncSession, email: str) -> Portfolio:
     usuario = (
         await db.execute(select(User).where(User.email == email.strip().lower()))
     ).scalar_one()
-    return await portfolio_crud.obter_padrao(db, usuario.id)
+    return await portfolio_crud.obter_padrao(db, usuario)

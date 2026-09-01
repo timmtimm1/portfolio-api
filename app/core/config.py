@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     #    contra abuso de recurso, nao contra adivinhacao.
     RATE_LIMIT_REFRESH: str = "30/minute"
 
+    # Demonstracao. Mais apertado que o cadastro (3/minute) porque cada chamada
+    # aqui CRIA uma conta, uma carteira, transacoes e meses de snapshots -- e
+    # tudo isso sem nenhuma prova de intencao humana, nem email, nem senha. E a
+    # rota mais barata de chamar e mais cara de servir do app inteiro.
+    RATE_LIMIT_DEMO: str = "2/minute"
+
+    # Validade da conta de demonstracao. Curta de proposito: o visitante veio de
+    # um link do LinkedIn, olha e sai. Guardar a conta por dias so acumularia
+    # lixo no banco para um retorno que nao acontece.
+    DEMO_VALIDADE_HORAS: int = 2
+
     # --- Cotacoes -------------------------------------------------------------
     # Token da brapi.dev. Opcional: sem ele o plano gratuito ainda responde para
     # alguns tickers, com limite bem menor.

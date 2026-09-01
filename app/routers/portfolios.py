@@ -27,7 +27,7 @@ async def listar(usuario: CurrentUser, db: DbDep) -> list[PortfolioRead]:
     """
     # Garante a carteira real antes de listar. Usuario novo ja a recebe -- sem
     # isso ele precisaria criar uma antes de conseguir lancar a primeira compra.
-    await portfolio_crud.obter_padrao(db, usuario.id)
+    await portfolio_crud.obter_padrao(db, usuario)
     carteiras = await portfolio_crud.listar(db, usuario.id)
     return [PortfolioRead.model_validate(c) for c in carteiras]
 
