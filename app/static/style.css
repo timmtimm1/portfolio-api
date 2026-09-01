@@ -522,3 +522,21 @@ h1, h2, h3, p { margin: 0; }
   .kpis { grid-template-columns: 1fr; }
   .usuario-txt { display: none; }
 }
+
+/* Marcador de posição ajustada por evento corporativo.
+   Discreto de propósito: é informação de exceção, não um alerta. Quem nunca
+   teve desdobramento nunca vê nada. */
+.marca-evento {
+  display: inline-block;
+  margin-left: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(53, 214, 232, .14);
+  color: var(--ciano);
+  cursor: help;
+  vertical-align: middle;
+}

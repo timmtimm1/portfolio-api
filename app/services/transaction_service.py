@@ -233,3 +233,21 @@ async def posicoes(db: AsyncSession, portfolio_id: uuid.UUID) -> list[Posicao]:
     eventos = await split_service.dos_ativos(db, {t.asset_id for t in transacoes})
     ajustadas = split.ajustar(transacoes, eventos)
     return sorted(calcular_posicoes(ajustadas).values(), key=lambda p: p.ticker)
+
+
+async def eventos_aplicados(
+    db: AsyncSession, portfolio_id: uuid.UUID
+) -> dict[str, list[split_service.EventoComTicker]]:
+    """Eventos corporativos que de fato mexeram em cada ativo desta carteira.
+
+    So os posteriores a primeira compra do ticker: um desdobramento de 2018 nao
+    diz respeito a quem comprou em 2020. Serve a interface, para ela explicar
+    por que a posicao mostra mais cotas do que o extrato.
+    """
+    stmt = _da_carteira(portfolio_id).options(selectinload(Transaction.asset))
+    transacoes = list((await db.execute(stmt)).scalars().all())
+    if not transacoes:
+        return {}
+
+    eventos = await split_service.dos_ativos(db, {t.asset_id for t in transacoes})
+    return split.eventos_por_ticker(transacoes, eventos)  # type: ignore[return-value]

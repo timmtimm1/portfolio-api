@@ -121,3 +121,34 @@ def ajustar(
             )
         )
     return ajustadas
+
+
+def eventos_por_ticker(
+    transacoes: Sequence[TransacaoLike], eventos: Sequence[EventoLike]
+) -> dict[str, list[EventoLike]]:
+    """Quais eventos de fato afetaram cada ativo desta carteira.
+
+    Nao e "todos os eventos do ativo": um desdobramento de 2018 nao diz
+    respeito a quem comprou em 2020. So entram os posteriores a PRIMEIRA
+    transacao do ticker -- que sao exatamente os que mudaram a quantidade que
+    a pessoa esta vendo.
+
+    Existe para a interface poder explicar a diferenca entre o extrato ("comprei
+    100") e a posicao ("tenho 200"). Sem essa explicacao o usuario ve os dois
+    numeros e conclui, com razao, que um dos dois esta errado.
+    """
+    primeira: dict[str, date_type] = {}
+    for t in transacoes:
+        anterior = primeira.get(t.ticker)
+        if anterior is None or t.traded_at < anterior:
+            primeira[t.ticker] = t.traded_at
+
+    por_ticker: dict[str, list[EventoLike]] = {}
+    for evento in eventos:
+        inicio = primeira.get(evento.ticker)
+        if inicio is not None and evento.data_ex > inicio:
+            por_ticker.setdefault(evento.ticker, []).append(evento)
+
+    for lista in por_ticker.values():
+        lista.sort(key=lambda e: e.data_ex)
+    return por_ticker

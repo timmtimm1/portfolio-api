@@ -360,6 +360,28 @@ async function carregarVisao() {
   renderOperacoesResumo(await api(comCarteira("/transactions?limit=5")));
 }
 
+/* Um marcador na posição cuja quantidade não bate com o extrato.
+
+   Sem isto o usuário vê "200 cotas" na posição e "comprei 100" nas
+   transações, e conclui -- com razão -- que um dos dois números está errado.
+   O texto vai no `title` porque é explicação sob demanda: quem nunca teve
+   desdobramento nunca precisa ler nada. */
+function marcaDeEvento(p) {
+  if (!p.eventos?.length) return null;
+
+  const marca = el("span", "marca-evento", "ajustada");
+  const detalhe = p.eventos
+    .map((e) => `${dataBR(e.data_ex)}: ${e.proporcao} (×${num(e.fator)})`)
+    .join("\n");
+  const total = p.eventos.reduce((acc, e) => acc * Number(e.fator), 1);
+  marca.title =
+    `Quantidade ajustada por ${p.eventos.length} evento` +
+    `${p.eventos.length > 1 ? "s" : ""} desde a primeira compra:\n${detalhe}\n\n` +
+    `Suas cotas foram multiplicadas por ${num(total)}. O custo total não muda ` +
+    `-- desdobramento reparte o mesmo dinheiro em mais pedaços.`;
+  return marca;
+}
+
 function renderPosicoesResumo(posicoes) {
   const lista = $("#lista-posicoes");
   limpar(lista);
@@ -370,7 +392,10 @@ function renderPosicoesResumo(posicoes) {
     linha.append(el("div", "ficha", p.ticker.slice(0, 4)));
 
     const txt = el("div", "linha-txt");
-    txt.append(el("strong", null, p.ticker));
+    const nome = el("strong", null, p.ticker);
+    const marca = marcaDeEvento(p);
+    if (marca) nome.append(marca);
+    txt.append(nome);
     txt.append(el("span", null, `${num(p.quantidade)} × ${brl.format(p.preco_medio)}`));
     linha.append(txt);
 
@@ -708,7 +733,10 @@ async function carregarPosicoes() {
   }
   for (const p of resumo.positions) {
     const tr = el("tr");
-    tr.append(el("td", null, p.ticker));
+    const tdTicker = el("td", null, p.ticker);
+    const marcaT = marcaDeEvento(p);
+    if (marcaT) tdTicker.append(marcaT);
+    tr.append(tdTicker);
     tr.append(el("td", "num", num(p.quantidade)));
     tr.append(el("td", "num", brl.format(p.preco_medio)));
     tr.append(el("td", "num", p.preco_atual ? brl.format(p.preco_atual) : "—"));

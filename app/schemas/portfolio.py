@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+from datetime import date as date_type
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 
 from app.schemas.transaction import _dinheiro, _enxuto
+
+
+class EventoAplicado(BaseModel):
+    """Um evento corporativo que mexeu nesta posição.
+
+    Existe para a tela poder explicar a diferença entre o extrato ("comprei
+    100") e a posição ("tenho 200"). Sem a explicação, o usuário vê os dois
+    números e conclui, com razão, que um dos dois está errado.
+    """
+
+    data_ex: date_type
+    proporcao: str = Field(description='Como a empresa anunciou: "2:1", "1:10", "103:100"')
+    fator: Decimal = Field(description="Por quanto a quantidade foi multiplicada")
+
+    @field_serializer("fator")
+    def _s_fator(self, v: Decimal) -> Decimal:
+        return _enxuto(v)
 
 
 class PositionSummary(BaseModel):
@@ -31,6 +49,10 @@ class PositionSummary(BaseModel):
     variacao_percentual: Decimal | None = None
     cotacao_em: datetime | None = None
     cotacao_fonte: str | None = None
+
+    # Vazio na esmagadora maioria dos casos -- so tem conteudo quando houve
+    # desdobramento, grupamento ou bonificacao DEPOIS da primeira compra.
+    eventos: list[EventoAplicado] = Field(default_factory=list)
 
     @field_serializer("quantidade", "preco_medio", "preco_atual")
     def _s_quantidade(self, v: Decimal | None) -> Decimal | None:

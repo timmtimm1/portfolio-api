@@ -8,7 +8,12 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.base import ProvedorDeCotacoes
-from app.schemas.portfolio import PortfolioSummary, PortfolioTotals, PositionSummary
+from app.schemas.portfolio import (
+    EventoAplicado,
+    PortfolioSummary,
+    PortfolioTotals,
+    PositionSummary,
+)
 from app.services import quote_service, transaction_service
 
 ZERO = Decimal(0)
@@ -32,6 +37,11 @@ async def resumo(
     posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertas = [p for p in posicoes if not p.esta_zerada]
 
+    # Quais eventos corporativos mexeram em cada ativo. Duas consultas a mais no
+    # pior caso, e nenhuma quando a carteira esta vazia -- a alternativa seria a
+    # tela mostrar 200 cotas contra um extrato de 100, sem explicar.
+    eventos_por_ticker = await transaction_service.eventos_aplicados(db, portfolio_id)
+
     cotacoes = await quote_service.cotacoes_atuais(
         db, provedor, [p.ticker for p in abertas], ttl_segundos=ttl_segundos
     )
@@ -47,6 +57,14 @@ async def resumo(
             preco_medio=posicao.preco_medio,
             custo_total=posicao.custo_total,
             resultado_realizado=posicao.resultado_realizado,
+            eventos=[
+                EventoAplicado(
+                    data_ex=e.data_ex,
+                    proporcao=f"{e.numerador.normalize():f}:{e.denominador.normalize():f}",
+                    fator=e.fator,
+                )
+                for e in eventos_por_ticker.get(posicao.ticker, [])
+            ],
         )
         total_custo += posicao.custo_total
 

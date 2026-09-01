@@ -278,3 +278,33 @@ class TestCartaoDeProventos:
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         trecho = js[js.find("btn-sync-proventos") :]
         assert "invalidar()" in trecho[:1200]
+
+
+class TestMarcaDePosicaoAjustada:
+    """Sem isto, o usuário vê "200 cotas" na posição e "comprei 100" no
+    extrato, e conclui -- com razão -- que um dos dois números está errado.
+    A matemática do desdobramento estava certa; faltava a comunicação.
+    """
+
+    def test_o_marcador_existe(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "marcaDeEvento" in js
+        assert "p.eventos" in js, "a marca precisa vir do campo `eventos` da API"
+
+    def test_so_marca_quando_ha_evento(self) -> None:
+        """Quem nunca teve desdobramento não pode ver nada -- é informação de
+        exceção, não um alerta permanente."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "if (!p.eventos?.length) return null;" in js
+
+    def test_os_dois_lugares_que_mostram_posicao_usam_a_marca(self) -> None:
+        """Resumo da visão geral E tabela completa. Marcar só um lugar deixaria
+        o outro contando a mesma história pela metade."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        # Duas CHAMADAS, sem depender do nome da variavel que recebe cada uma.
+        chamadas = js.count("marcaDeEvento(p)") - js.count("function marcaDeEvento(p)")
+        assert chamadas == 2, f"esperava 2 chamadas, achei {chamadas}"
+
+    def test_o_estilo_do_marcador_existe(self) -> None:
+        css = (ESTATICOS / "style.css").read_text()
+        assert ".marca-evento" in css
