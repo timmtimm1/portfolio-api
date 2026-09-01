@@ -1,356 +1,403 @@
 # Portfolio Tracker API
 
-API REST para acompanhamento de carteira de investimentos da B3: o usuário registra
-suas compras e vendas, e o sistema calcula posição, rentabilidade, risco e sugere
-alocações usando a fronteira eficiente de Markowitz.
+Uma API que responde três perguntas sobre uma carteira da B3:
 
-> **Em construção.** O projeto está sendo desenvolvido em etapas curtas e verificáveis;
-> o quadro abaixo mostra onde ele está.
+1. **Quanto eu tenho?** — posição, preço médio, lucro e prejuízo
+2. **Fui bem?** — comparado ao CDI, à Selic, à inflação e ao Ibovespa
+3. **Poderia ser melhor?** — a fronteira eficiente de Markowitz, sobre os seus ativos
 
-| # | Etapa | Estado |
-|---|---|---|
-| 0 | Fundação: FastAPI, Docker, configuração *fail-closed* | ✅ |
-| 1 | Camada de dados async, Alembic, model `User` | ✅ |
-| 2 | Registro e login (argon2id + JWT) | ✅ |
-| 3 | Sessão: rotação de refresh token, detecção de reuso, rate limit | ✅ |
-| 4 | Suíte de testes com Postgres efêmero + CI | ✅ |
-| 5 | Catálogo de ativos da B3 e carga histórica | ✅ |
-| 6 | Livro de transações e cálculo de posição | ✅ |
-| 7 | Cotações (brapi/yfinance) com cache | ✅ |
-| 8 | Métricas: retorno, volatilidade, correlação | ✅ |
-| 9 | Otimização de Markowitz | ✅ |
-| 10 | Snapshots diários da carteira | ✅ |
-| 11 | Frontend com o gráfico da fronteira | ✅ |
-| 12 | Deploy | ⬜ |
+Você registra as compras e vendas. Todo o resto é calculado a partir disso — não existe
+uma coluna "saldo" em lugar nenhum do banco.
 
-## Stack
+![Visão geral do painel](docs/img/visao-geral.jpg)
 
-Python 3.12 · FastAPI · SQLAlchemy 2.0 (async, asyncpg) · Alembic · PostgreSQL 17 ·
+**Stack:** Python 3.12 · FastAPI · SQLAlchemy 2.0 async · PostgreSQL 17 · Alembic ·
 pytest + testcontainers · uv · ruff · mypy strict
 
-## Arquitetura
+**Tamanho:** 7.839 linhas em `app/`, 6.236 em testes, **442 testes**, 95% de cobertura,
+28 endpoints, 12 tabelas.
 
-As dependências apontam sempre para baixo. A camada de serviço não importa FastAPI,
-e o módulo de segurança não conhece banco nem models — é o que permite reusar as
-regras num job de cron e testar a criptografia de forma exaustiva, sem Postgres.
+---
+
+## Índice
+
+- [A ideia central: o livro é a verdade](#a-ideia-central-o-livro-é-a-verdade)
+- [Como rodar](#como-rodar)
+- [O caminho de um pedido](#o-caminho-de-um-pedido)
+- [As tabelas e como se ligam](#as-tabelas-e-como-se-ligam)
+- [O que cada parte do código faz](#o-que-cada-parte-do-código-faz)
+- [As telas](#as-telas)
+- [A fronteira eficiente, sem fórmula](#a-fronteira-eficiente-sem-fórmula)
+- [Decisões que valem explicar](#decisões-que-valem-explicar)
+- [Erros que ficaram registrados](#erros-que-ficaram-registrados)
+
+---
+
+## A ideia central: o livro é a verdade
+
+Se você entender só uma coisa deste projeto, que seja esta.
+
+O banco **não guarda quanto você tem**. Ele guarda o que você fez:
 
 ```
-routers/    HTTP: status code, cabeçalho, cookie
-   ↓
-schemas/    validação e normalização da entrada (≠ o que está no banco)
-   ↓
-services/   regras de negócio; levantam exceções de domínio, não HTTPException
-   ↓
-models/     tabelas
-   ↓
-core/       config, sessão de banco, segurança, dependências
+20/08/2026   COMPRA   45 TAEE11   a R$ 37,39
 ```
 
-## Carteiras: a real e as simuladas
+Posição, preço médio, lucro, rentabilidade — tudo isso é recalculado a partir do
+livro de transações, a cada consulta.
 
-Cada usuário tem uma **Carteira real** (criada automaticamente) e quantas simulações
-quiser. A simulada usa exatamente a mesma matemática — mesmo preço médio, mesma cotação,
-mesma fronteira eficiente. O tipo existe para que a interface nunca confunda *"o que eu
-tenho"* com *"o que estou avaliando"*, e a simulada aparece com um selo âmbar.
+Parece trabalho desnecessário. Não é. Guardar o saldo cria dois lugares onde a
+verdade pode morar, e um dia eles discordam: você apaga uma compra antiga e o saldo
+não acompanha. Com uma fonte só, **o extrato sempre explica o saldo** — porque o
+saldo *é* o extrato, somado.
 
-Três decisões que sustentam isso:
+Isso governa três coisas que parecem separadas e não são:
 
-- **A chave do snapshot é `(carteira, dia)`**, não `(usuário, dia)`. Fosse a segunda, a
-  simulada sobrescreveria a foto da real silenciosamente.
-- **Autorização em ponto único**: `get_carteira` é o único caminho pelo qual um
-  `portfolio_id` vindo do cliente entra no sistema, e ele busca por id **e** por dono na
-  mesma consulta. Daqui para dentro, carteira alheia não existe — os serviços filtram só
-  por `portfolio_id`, sem repetir a checagem. 404, nunca 403.
-- **A carteira padrão é a real, escolhida pelo tipo** — não "a primeira da lista". Onde
-  uma transação sem `portfolio_id` é lançada não pode depender de ordenação.
-
-## Regras de negócio
-
-**Custo médio ponderado, a regra brasileira.** A venda **não altera o preço médio** —
-reduz quantidade e custo proporcionalmente, deixando a divisão intacta. Quem implementa
-FIFO por hábito de mercado estrangeiro produz preço médio errado e, com ele, imposto
-errado. Taxas de compra entram no custo de aquisição; taxas de venda saem do resultado.
-
-**A posição é derivada, nunca armazenada.** Quantidade e preço médio são reconstruídos
-do livro a cada consulta. Uma coluna de saldo seria mais rápida e criaria duas fontes da
-verdade — e quando elas divergissem, ninguém saberia qual está certa.
-
-**Validação retroativa.** Lançar uma operação recalcula o livro inteiro daquele ativo em
-ordem cronológica: uma venda com data antiga pode ser inválida mesmo com a posição de
-hoje sendo positiva. Conferir só o saldo atual deixaria esse caso passar.
-
-## Cotações
-
-brapi.dev como fonte primária, Yahoo Finance completando as lacunas, e **cache em
-tabela com TTL de 15 minutos**. Medido nesta máquina, com cotação real:
-
-| | tempo |
+| Situação | O que acontece |
 |---|---|
-| cache vazio (chama o fornecedor) | 3.740 ms |
-| cache dentro do TTL | **8 ms** |
+| Você apaga uma transação | O histórico do gráfico é reconstruído sozinho |
+| A TAEE11 paga dividendo | Quanto você recebeu vem de quantas cotas o livro dizia ter naquele dia |
+| A WEGE3 desdobra 2:1 | Suas 100 cotas viram 200 na leitura, e o livro nem é tocado |
 
-Chamar a API externa a cada request faria o endpoint depender da latência e da
-disponibilidade de um terceiro — e a cota gratuita (15 mil chamadas/mês) evaporaria com
-poucos usuários. O cache vive no banco, não em memória: com vários workers, um cache em
-memória duplicaria as chamadas.
+---
 
-Quando **nenhum** fornecedor responde, a carteira ainda é devolvida — com o cache vencido
-se houver, e os tickers afetados listados em `sem_cotacao`. Degradar é melhor que falhar.
+## Como rodar
 
-## Métricas de risco
-
-Retorno anualizado, volatilidade, Sharpe, maior queda e matriz de correlação, calculados
-sobre o histórico no banco. Resultado com dados reais (249 pregões):
-
-```
-ativo     ret. ano   volat.   Sharpe   maior queda
-VALE3       54.3%    25.6%     1.73        -20.2%
-PETR4       49.3%    25.3%     1.55        -22.2%
-ITUB4       17.2%    24.0%     0.30        -22.5%
-BBAS3       -3.2%    28.2%    -0.47        -34.8%
-```
-
-Convenções, cada uma com um erro comum associado:
-
-- **252 pregões por ano, não 365.** A B3 não negocia fim de semana nem feriado;
-  anualizar com 365 infla a volatilidade em ~20%. E a anualização usa a **raiz** de 252
-  — multiplicar por 252 infla o número em quase 16 vezes.
-- **Retorno geométrico, não média aritmética.** Cai 50%, sobe 50%: a média aritmética
-  diz 0%, o resultado real é −25%. A média mente sistematicamente para cima.
-- **Taxa livre de risco ≠ zero.** No Brasil é o CDI/Selic. Com o CDI a 10%, o BBAS3
-  acima tem Sharpe **negativo** — rendeu menos que o Tesouro Selic assumindo risco de
-  renda variável. Usar `rf=0`, como em exemplos americanos, o tornaria positivo.
-- **Correlação entre retornos, não entre preços.** Séries de preços de duas ações quase
-  sempre correlacionam alto porque ambas sobem com o mercado — correlação espúria.
-- **Séries alinhadas pela interseção das datas**, e o alinhamento é garantido pelo
-  **tipo**, não por convenção. Correlacionar históricos de tamanhos ou períodos diferentes
-  produz um número com a forma certa e o significado errado — e nada estoura. Por isso os
-  cálculos recebem `SeriesAlinhadas`, cujas invariantes (um preço por data, datas em ordem
-  estrita, sem repetição) são verificadas na construção: se o objeto existe, está alinhado,
-  e nenhuma função adiante precisa reconferir.
-- **Desvio-padrão amostral (`ddof=1`)**, que não subestima o risco.
-
-`Decimal` para dinheiro, `float` para estatística — a fronteira é uma função com nome
-(`para_float`), não `float(x)` espalhado pelo código.
-
-## Comparação com CDI e Selic
-
-O gráfico de evolução traz a curva do indexador ao lado da carteira, com a resposta que
-todo investidor brasileiro quer: **bati o CDI?**
-
-A curva **não** é a taxa acumulada pura. É *"se eu tivesse posto o mesmo dinheiro, nos
-mesmos dias, no CDI, quanto teria hoje?"*:
-
-```
-equivalente[0] = custo[0]
-equivalente[t] = equivalente[t-1] × (1 + taxa_do_dia) + aporte[t]
-```
-
-A diferença importa quando há aportes: aplicar a taxa só sobre o valor inicial subestima
-o benchmark e faz a carteira parecer melhor do que foi. E o aporte entra **depois** de
-render — dinheiro que chegou hoje não estava aplicado ontem.
-
-### O gráfico é percentual, e usa TWR
-
-Em reais, uma carteira que cresceu esmaga a escala e o CDI vira uma linha reta sem
-informação. Em percentual, as duas curvas partem de 0% e a comparação fica legível.
-
-Mas o percentual **não** é `valor_mercado / custo − 1`. Esse número despenca a cada
-aporte, sem o mercado ter mexido:
-
-```
-dia 1: investe 1.000, vale 1.100          →  +10,0%
-dia 2: aporta 1.000, mercado parado
-       vale 2.100, custo 2.000            →   +5,0%   ← caiu pela metade!
-```
-
-Um gráfico assim mostraria quedas que nunca aconteceram, justamente nos dias em que a
-pessoa investiu mais. Usamos **retorno ponderado pelo tempo (TWR)**, que isola o efeito do
-mercado:
-
-```
-r[t] = (valor[t] − aporte[t]) / valor[t-1] − 1
-acumulado[t] = acumulado[t-1] × (1 + r[t])
-```
-
-No exemplo: `(2.100 − 1.000) / 1.100 − 1 = 0%`, e o acumulado segue +10%. É a medida que
-fundos reportam, e a única comparável com o CDI acumulado. O botão `R$` alterna para a
-escala em reais quando o que interessa é o patrimônio, não o desempenho.
-
-Fonte: [SGS do Banco Central](https://api.bcb.gov.br) (séries 12 e 11), oficial, pública e
-sem token. Taxa passada não muda, então é gravada uma vez e nunca mais buscada — sem TTL,
-só preenchimento de lacunas. Dia sem taxa publicada (fim de semana, feriado) não rende,
-que é o comportamento real do CDI.
-
-## Otimização de Markowitz
-
-Implementada **na mão** com `scipy.optimize` (SLSQP), não com uma biblioteca de
-otimização pronta. Resolve, para cada retorno-alvo:
-
-```
-minimizar    w' Σ w              (variância da carteira)
-sujeito a    w' μ  = μ*          (atinge o retorno desejado)
-             soma(w) = 1         (investe todo o capital)
-             0 ≤ wᵢ ≤ limite     (sem venda a descoberto, sem concentrar)
-```
-
-Resultado com dados reais da B3 (249 pregões, teto de 35% por ativo):
-
-```
-              ativos individuais:  volatilidade 24% a 29%
-
-MÍNIMA VARIÂNCIA   retorno 42.0%   volatilidade 14.1%   Sharpe 2.28
-  PETR4 33.9%  ABEV3 20.0%  VALE3 19.8%  WEGE3 14.5%  ITUB4 11.8%
-
-MÁXIMO SHARPE      retorno 47.3%   volatilidade 14.6%   Sharpe 2.55
-  PETR4 35.0%  VALE3 35.0%  WEGE3 15.1%  ABEV3 14.9%
-```
-
-A volatilidade cai de ~25% (ativos isolados) para **14,1%** na carteira — esse é o
-efeito que Markowitz formalizou: o risco de uma carteira não é a média dos riscos, e sim
-função de como os ativos se movem juntos.
-
-**Validação por três caminhos independentes** (`tests/test_optimizer.py`):
-
-1. **Fórmula fechada.** A mínima variância sem restrições tem solução analítica exata
-   (`w = Σ⁻¹1 / 1'Σ⁻¹1`). Diferença medida: **1.7e-15**.
-2. **Propriedades.** Nenhuma de 500 carteiras aleatórias tem variância menor que a
-   encontrada; nenhuma de 300 tem Sharpe maior.
-3. **`skfolio`.** Implementação independente e madura, com as mesmas restrições: pesos
-   diferem em <2e-3, Sharpe em **1.9e-9**.
-
-**Limitações que o código não esconde.** O retorno esperado é estimado sobre o histórico,
-e essa é a parte frágil do modelo — pequenas mudanças na janela produzem carteiras bem
-diferentes. Por isso a carteira de **mínima variância é mais confiável** que a de máximo
-Sharpe: ela não usa retorno esperado, só covariância, que é bem mais estável. E por isso
-existe o limite por ativo: sem ele, o otimizador aloca quase tudo no papel que mais subiu
-na amostra — ótimo para o passado, o oposto de diversificar. A resposta sempre inclui um
-campo `aviso` com essa ressalva.
-
-## Snapshots diários
-
-Um job no GitHub Actions fotografa todas as carteiras às 18h15 (Brasília), depois do
-fechamento da B3. É o **único dado do sistema que não é reconstruível**: a posição sai do
-livro a qualquer momento, mas o valor de mercado de ontem dependia da cotação de ontem,
-que já foi sobrescrita no cache.
-
-- **Idempotência imposta pelo schema**: a chave primária `(user_id, date)` garante uma
-  foto por dia. Rodar duas vezes atualiza a linha com a cotação mais recente — o cron
-  pode ter nova tentativa sem risco de duplicar histórico.
-- **Uma busca de cotação para todos os usuários.** Buscar por usuário seria N+1 contra a
-  API externa: 100 usuários com PETR4 = 100 consultas do mesmo preço, e a cota gratuita
-  de 15 mil chamadas/mês estoura em dias.
-- **Autenticação de máquina, não de pessoa.** Chave de serviço de 384 bits em cabeçalho
-  (nunca na URL — URLs vão para log de acesso e de proxy), comparada com
-  `secrets.compare_digest`. Uma comparação normal para no primeiro byte diferente, e essa
-  diferença de tempo é mensurável pela rede: o atacante descobre a chave um caractere por
-  vez. Sem chave configurada, a rota devolve **404** — fail-closed.
-- **Menor privilégio nos dois sentidos**: a chave de serviço não lê carteira de ninguém,
-  e o token de usuário não dispara o job.
-
-## Decisões de segurança
-
-Cada uma está justificada na docstring do módulo correspondente.
-
-- **A aplicação não sobe sem segredo.** `SECRET_KEY` e a senha do banco não têm valor
-  padrão; uma chave com menos de 32 caracteres é rejeitada no boot. Variável de
-  ambiente com typo vira erro de inicialização (`extra="forbid"`), não um segredo
-  silenciosamente ignorado.
-- **Segredos não vazam em log.** `SecretStr` mascara em `repr()`, e a URL do banco é
-  um objeto `URL` do SQLAlchemy, que oculta a senha em traceback e em mensagem de
-  erro de conexão.
-- **Senha com argon2id** (`pwdlib`), com regravação automática do hash no login quando
-  os parâmetros mudam. Limite de 128 caracteres na entrada: sem teto, uma senha de
-  megabytes vira negação de serviço no hash.
-- **Login em tempo constante.** Email inexistente paga o custo de um argon2 descartável.
-  Sem isso, a resposta em ~2 ms denunciaria quais emails têm conta, mesmo com a
-  mensagem de erro idêntica.
-- **JWT com `algorithms` fixo** e claim `typ`: barra o ataque `alg=none` e a confusão
-  entre token de acesso e de renovação.
-- **Refresh token não é JWT.** É um valor opaco de 384 bits, guardado no banco apenas
-  como SHA-256 — um dump vazado não contém sessão utilizável. Viaja em cookie
-  `httpOnly` + `SameSite=Strict` com path restrito: XSS não lê, CSRF não envia.
-- **Rotação com detecção de reuso.** Cada refresh token vale uma vez; reapresentar um
-  já rotacionado derruba todas as sessões do usuário (RFC 9700).
-- **Rate limit por IP** no login, cadastro e refresh — não bloqueio por conta, que
-  seria negação de serviço contra o próprio usuário.
-- **Chave primária em UUID**: não há id sequencial para enumerar.
-- **CSP, HSTS, `X-Frame-Options`, `nosniff`, `Referrer-Policy`** em toda resposta.
-- **Toda consulta filtra por `user_id`**, num único ponto centralizado — e recurso de
-  outro usuário devolve **404, não 403** (403 confirmaria que aquele id existe).
-- **Todo timeout configurado** nas chamadas externas (connect/read/write/pool). Sem
-  teto, um fornecedor que aceita a conexão e nunca responde prende o worker para sempre.
-- **Resposta externa lida defensivamente**: um campo que suma numa atualização do
-  fornecedor é ignorado, não vira 500 para o usuário. Preço zero ou negativo é rejeitado
-  como dado corrompido.
-- **`pip-audit` no CI**, semanalmente — a maior parte das falhas de uma aplicação não
-  está no código dela, está no que ela importa.
-
-## Frontend
-
-Painel escuro servido pela **própria API** em `/app` — sem build, sem deploy separado e,
-o que mais importa, **sem CORS**: página e API compartilham a origem, então o cookie
-httpOnly do refresh token viaja normalmente. Um frontend em outro domínio exigiria
-`SameSite=None`, enfraquecendo justamente a proteção contra CSRF.
-
-Quatro telas: visão geral (KPIs + evolução da carteira), posições com matriz de
-correlação, fronteira eficiente interativa e livro de transações. HTML/CSS/JS puros,
-Chart.js via CDN — nenhuma dependência de build.
-
-Duas decisões de segurança governam o cliente, e há teste no CI para cada uma:
-
-- **O access token vive numa variável, nunca em `localStorage`.** localStorage é legível
-  por qualquer script da página. A sessão é retomada pelo cookie httpOnly, que o
-  JavaScript não consegue ler nem vazar.
-- **Nenhum `innerHTML` com dado da API.** Todo texto entra por `textContent`: um nome de
-  ativo com `<img onerror=...>` vira texto, não script.
-
-Os testes também garantem que o HTML não tem script inline nem `onclick=` — a CSP proíbe
-os dois, e uma página que os use **carrega mas não funciona**, reclamando só no console.
-
-## Rodando localmente
+Você precisa de **Docker** e **[uv](https://docs.astral.sh/uv/)**.
 
 ```bash
-cp .env.example .env          # gere SECRET_KEY: python -c "import secrets; print(secrets.token_urlsafe(64))"
-uv sync
-make banco                    # Postgres via Docker
-make migrar
-make api                      # http://127.0.0.1:8000/docs
+git clone https://github.com/timmtimm1/portfolio-api.git
+cd portfolio-api
+
+cp .env.example .env        # e edite: SECRET_KEY e POSTGRES_PASSWORD
+make banco                  # sobe o Postgres
+make migrar                 # cria as tabelas
+make api                    # sobe a API com reload
 ```
 
-## Carga inicial de dados
+Abra **http://localhost:8000/painel/** para a interface, ou
+**http://localhost:8000/docs** para a documentação interativa da API.
 
-O catálogo e o histórico vêm dos CSVs da pipeline
-[`mercado_financeiro`](https://github.com/timmtimm1/mercado_financeiro) — 151 tickers
-filtrados por liquidez e um ano de fechamentos reais:
+Outros comandos:
 
 ```bash
-uv run python -m scripts.seed_b3 --origem ~/Projects/mercado_financeiro
+make testes      # roda a suíte
+make cobertura   # suíte com relatório de cobertura
+make verificar   # tudo que o CI roda: lint, tipos e testes
 ```
 
-O script é idempotente (upsert por chave natural) e insere em lotes de 5.000 linhas:
-37 mil `INSERT` individuais levariam minutos, o lote leva segundos.
+---
 
-Para reconstruir o histórico da carteira a partir desses fechamentos (em vez de esperar
-meses para o gráfico ganhar forma):
+## O caminho de um pedido
 
-```bash
-uv run python -m scripts.backfill_snapshots --email voce@exemplo.com --desde 2026-01-01
+Vamos seguir um `GET /portfolio/summary` do começo ao fim. Todo endpoint segue esse
+mesmo formato.
+
+```
+  Navegador
+     │
+     │  GET /api/v1/portfolio/summary?portfolio_id=…
+     ▼
+┌─────────────────────────────────────────────────────────┐
+│  app/routers/     Fala HTTP. Recebe, valida, responde.  │
+│                   Não sabe fazer conta.                 │
+└─────────────────────────────────────────────────────────┘
+     │  Quem é você? (JWT)  ·  Esta carteira é sua?
+     ▼
+┌─────────────────────────────────────────────────────────┐
+│  app/core/deps.py    As dependências: sessão de banco,  │
+│                      usuário atual, carteira atual.     │
+└─────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌─────────────────────────────────────────────────────────┐
+│  app/services/    Onde mora a regra. Lê o livro, ajusta │
+│                   por desdobramento, calcula a posição. │
+└─────────────────────────────────────────────────────────┘
+     │                                    │
+     ▼                                    ▼
+┌──────────────────────┐    ┌──────────────────────────────┐
+│  app/models/         │    │  app/clients/                │
+│  As tabelas          │    │  brapi, Yahoo, Banco Central │
+└──────────────────────┘    └──────────────────────────────┘
+     │
+     ▼
+┌─────────────────────────────────────────────────────────┐
+│  app/schemas/     Molda a resposta. Decide o que sai --  │
+│                   e o que NÃO sai (o `user_id`, por ex.) │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Testes
+A regra que mantém isso honesto: **cada camada só fala com a de baixo.** Um router
+nunca escreve SQL; um serviço nunca sabe o que é um código HTTP. Quando você
+precisar mexer em algo, isso diz exatamente onde procurar.
 
-```bash
-make testes       # suíte completa
-make cobertura    # com relatório de cobertura
-make verificar    # exatamente o que o CI roda: lint + tipagem + testes
+---
+
+## As tabelas e como se ligam
+
+```mermaid
+erDiagram
+    users ||--o{ portfolios : "tem"
+    users ||--o{ refresh_tokens : "tem sessões"
+    portfolios ||--o{ transactions : "registra"
+    portfolios ||--o{ portfolio_snapshots : "fotografa"
+    assets ||--o{ transactions : "é negociado em"
+    assets ||--o{ price_history : "tem fechamentos"
+    assets ||--o{ price_quotes : "tem cotação atual"
+    assets ||--o{ dividends : "paga"
+    assets ||--o{ splits : "desdobra"
+
+    users {
+        uuid id PK
+        string email UK
+        string hashed_password "argon2id"
+        bool is_active
+    }
+    portfolios {
+        uuid id PK
+        uuid user_id FK
+        string nome
+        string tipo "real ou simulada"
+    }
+    transactions {
+        uuid id PK
+        uuid portfolio_id FK
+        uuid asset_id FK
+        string side "compra ou venda"
+        numeric quantity
+        numeric price
+        numeric fees
+        date traded_at
+    }
+    assets {
+        uuid id PK
+        string ticker UK "PETR4, sem sufixo"
+        string nome
+        string setor
+        string tipo "acao, fii, etf…"
+    }
+    price_history {
+        uuid asset_id PK
+        date date PK
+        numeric close
+    }
+    price_quotes {
+        uuid asset_id PK
+        numeric price
+        timestamp fetched_at "TTL de 15 min"
+        string source
+    }
+    dividends {
+        uuid asset_id PK
+        date data_com PK "quem tinha nesse dia recebe"
+        string tipo PK "dividendo, jcp, rendimento"
+        numeric valor_por_cota
+    }
+    splits {
+        uuid asset_id PK
+        date data_ex PK
+        numeric numerador "2:1 -> 2"
+        numeric denominador "2:1 -> 1"
+    }
+    portfolio_snapshots {
+        uuid portfolio_id PK
+        date date PK
+        numeric custo_total
+        numeric valor_mercado
+    }
+    benchmark_rates {
+        string indexador PK "cdi, selic, ipca, ibov"
+        date date PK
+        numeric rate "em fração, não em %"
+    }
 ```
 
-A suíte sobe um **PostgreSQL real e descartável** via testcontainers e aplica as
-migrations nele — testar em SQLite e rodar em Postgres seria testar outro banco.
-Cada teste roda dentro de uma transação com rollback, então a ordem de execução não
-importa.
+### Lendo o diagrama: há dois mundos aqui
+
+**O mundo do usuário** — `users`, `portfolios`, `transactions`, `portfolio_snapshots`.
+São os seus dados. Tudo aqui tem dono, e nenhuma consulta atravessa de um usuário
+para outro.
+
+**O mundo do mercado** — `assets`, `price_history`, `price_quotes`, `dividends`,
+`splits`, `benchmark_rates`. São fatos públicos, iguais para todo mundo. Repare que
+**nenhuma dessas tabelas tem `user_id`** — e isso é deliberado.
+
+A TAEE11 pagou R$ 0,60 por unit com data-com em 17/08/2026. Isso é verdade para
+qualquer pessoa. **Quanto *você* recebeu** é o cruzamento desse fato com o seu livro
+naquele dia — calculado na hora, não guardado.
+
+Se eu gravasse "o Bernardo recebeu R$ 27,00", criaria a chance dos dois discordarem:
+apagar uma compra antiga deixaria o provento gravado para sempre, referente a cotas
+que a carteira nunca teve.
+
+`benchmark_rates` é a única tabela sem ligação nenhuma — CDI e IPCA não pertencem a
+ativo nem a usuário, são só séries do Banco Central.
+
+### Volumes hoje
+
+| Tabela | Linhas | O que é |
+|---|---:|---|
+| `price_history` | 37.268 | Um ano de fechamentos dos 151 ativos |
+| `benchmark_rates` | 486 | CDI, Selic, IPCA e Ibovespa, dia a dia |
+| `assets` | 151 | Catálogo da B3 |
+| `portfolio_snapshots` | 77 | A foto diária das carteiras |
+| `dividends` | 54 | Proventos anunciados |
+| `splits` | 6 | Desdobramentos e bonificações |
+| `transactions` | 6 | O livro |
+
+---
+
+## O que cada parte do código faz
+
+### Os módulos puros: matemática sem banco
+
+Estes quatro não sabem o que é SQL, HTTP ou ORM. Entram números, saem números — o
+que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
+
+| Arquivo | O que faz |
+|---|---|
+| **`services/position.py`** | O preço médio brasileiro. Compra aumenta o custo; **venda não muda o preço médio** — mexe no resultado realizado. Taxa de compra entra no custo, taxa de venda sai do lucro. |
+| **`services/metrics.py`** | Volatilidade, correlação, covariância. 252 pregões por ano, desvio-padrão *amostral*, retorno *geométrico* (CAGR) e não média simples. |
+| **`services/optimizer.py`** | Markowitz. Recebe retornos esperados e covariância, devolve pesos. Resolve 50 problemas de otimização (SLSQP) para desenhar a fronteira. |
+| **`services/dividend.py`** | Quanto você recebeu, dada a data-com. E o desconto de 15% quando é JCP. |
+| **`services/split.py`** | Reescreve o livro nos termos de hoje. 100 ações antes de um 2:1 viram 200 a metade do preço — **e o custo total não muda**. |
+
+### As camadas que falam com o mundo
+
+| Pasta | Papel |
+|---|---|
+| **`app/routers/`** | Os 28 endpoints. Recebem, delegam, respondem. |
+| **`app/services/*_service.py`** | Orquestram: leem do banco, chamam o módulo puro, gravam. |
+| **`app/models/`** | As tabelas, em SQLAlchemy. |
+| **`app/schemas/`** | A forma da resposta, em Pydantic. É aqui que se decide o que **não** sai. |
+| **`app/clients/`** | Os fornecedores externos, cada um num arquivo. |
+| **`app/core/`** | Configuração, banco, segurança, dependências, rate limit. |
+
+### Os fornecedores externos
+
+| Arquivo | De onde vem | O que traz |
+|---|---|---|
+| `clients/brapi.py` | brapi.dev | Cotação atual (fonte primária) |
+| `clients/yahoo.py` | Yahoo Finance | Cotação de reserva, **proventos** e **desdobramentos** |
+| `clients/bcb.py` | Banco Central (SGS) | CDI (série 12), Selic (11), IPCA (433) |
+| `clients/ibov.py` | Yahoo Finance | Ibovespa — o BCB descontinuou a série em 2019 |
+| `clients/composto.py` | — | Encadeia brapi → Yahoo: se o primeiro falha, o segundo completa |
+
+Todos seguem a mesma regra: **falha externa nunca derruba a página.** Se o Banco
+Central está fora do ar, a carteira aparece sem a linha do CDI e com uma frase
+explicando por quê — nunca um erro 500.
+
+---
+
+## As telas
+
+### Posições
+
+Preço médio, cotação atual e resultado por ativo. O selo **`AJUSTADA`** aparece quando
+a quantidade foi corrigida por desdobramento — sem ele, você veria 200 cotas na posição
+e uma compra de 100 no extrato, e concluiria, com razão, que um dos dois está errado.
+
+![Tela de posições](docs/img/posicoes.jpg)
+
+### Fronteira eficiente
+
+A nuvem de carteiras possíveis, a curva na borda, e dois pontos marcados: a de menor
+risco e a de melhor relação risco-retorno.
+
+![Fronteira eficiente](docs/img/fronteira.jpg)
+
+### Transações
+
+O livro. Tudo o mais sai daqui.
+
+![Transações](docs/img/transacoes.jpg)
+
+---
+
+## A fronteira eficiente, sem fórmula
+
+A intuição errada é que o risco de uma carteira é a média dos riscos dos ativos.
+
+Pegue dois ativos que oscilam 30% ao ano cada. Se sobem e descem **juntos**, a carteira
+oscila 30%. Se andam em direções **opostas**, oscila bem menos — quando um cai, o outro
+segura. Mesmo risco individual, risco de carteira completamente diferente.
+
+Foi isso que Markowitz formalizou em 1952: o que importa não é o risco de cada ativo, é
+**como eles se movem entre si**. Por isso a matriz de covariância é a entrada central do
+cálculo.
+
+**O que o gráfico mostra:** existem infinitas formas de dividir seu dinheiro entre os
+seus ativos. Cada combinação vira um ponto — risco no eixo horizontal, retorno esperado
+no vertical. A **fronteira é a borda superior esquerda** dessa nuvem: se uma carteira
+cai *dentro* da nuvem, existe outra que dá mais retorno com o mesmo risco. Ela é
+simplesmente pior.
+
+**Como o código calcula** (`services/optimizer.py`): escolhe um retorno-alvo, pergunta
+qual combinação o atinge com a menor volatilidade, e repete **50 vezes**. Sujeito a três
+regras: os pesos somam 100%, nenhum é negativo, e nenhum ativo passa de 40%.
+
+Esse limite de 40% não é matemática, é bom senso enfiado no modelo à força. Sem ele, o
+otimizador rotineiramente joga quase tudo no papel que mais subiu na amostra —
+matematicamente ótimo para o passado, e o oposto de diversificar.
+
+> **A limitação que o código não esconde:** o modelo assume que o passado estima o
+> futuro. Ele não estima. Mude a janela de observação em alguns meses e a carteira ótima
+> muda completamente. O valor da fronteira é **mostrar o trade-off**, não entregar a
+> resposta certa.
+
+---
+
+## Decisões que valem explicar
+
+**`Decimal` para dinheiro, `float` para estatística.** Em ponto flutuante binário,
+`0.1 + 0.2 == 0.30000000000000004`. Num preço médio somado sobre dezenas de transações,
+isso vira centavo faltando. Já volatilidade e covariância são estimativas com incerteza
+na terceira casa — usar `Decimal` ali seria precisão de mentira, e 100× mais lento. A
+fronteira entre os dois mundos é explícita no código.
+
+**JWT escrito à mão, não uma biblioteca de auth.** Access token de 15 minutos em
+memória; refresh opaco de 384 bits em cookie `httpOnly`, guardado como SHA-256. Rotação
+a cada uso, com detecção de reuso: se um token já usado reaparece, a família inteira é
+revogada. Escrever isso ensinou mais do que instalar um pacote — e é a parte que um
+entrevistador mais gosta de perguntar.
+
+**O token nunca vai para o `localStorage`.** `localStorage` é legível por qualquer
+script da página: uma dependência comprometida entrega a sessão. Aqui o token vive numa
+variável e some ao fechar a aba; a sessão é retomada pelo cookie que o JavaScript não
+consegue ler.
+
+**Migrations, sempre — e lidas antes de rodar.** O `--autogenerate` já produziu, mais de
+uma vez, um `DROP CONSTRAINT` em restrições corretas. Aplicar sem ler teria deixado o
+banco aceitando qualquer string numa coluna que só deveria aceitar `compra` ou `venda`.
+
+**`lazy="raise"` nos relacionamentos.** Um acesso não carregado levanta exceção em vez
+de disparar uma consulta em silêncio. É a diferença entre descobrir um N+1 no primeiro
+teste e descobrir em produção, seis meses depois, quando a página começa a demorar.
+
+---
+
+## Erros que ficaram registrados
+
+Nenhum destes quebrou o sistema. Todos produziram um número plausível e errado — que é
+a única categoria de defeito que realmente assusta num app de dinheiro.
+
+| O que aconteceu | Por que passou despercebido |
+|---|---|
+| Cobertura reportava 83% falsos | O rastreador perdia o fluxo depois do primeiro `await` num contexto async |
+| Login parecia recusar a senha certa | Era o rate limit (429), e a tela mostrava a mesma mensagem para qualquer falha |
+| A tela de login não sumia após entrar | `display: grid` no CSS vence o atributo `hidden` do navegador |
+| Duas abas deslogavam o usuário | Ambas renovavam com o mesmo token, e a detecção de reuso disparava |
+| O gráfico congelava | Apagar uma transação não invalidava os snapshots já gravados |
+| "Sem comparação" mostrava o CDI | O parâmetro tinha valor padrão, então *omitir* significava "use o padrão" |
+| O retorno vinha subestimado | Proventos não entravam na conta: na data-com o preço cai, e o dinheiro recebido não aparecia |
+| Sincronizar duas vezes duplicava provento | Reclassificar liberava a vaga na chave primária, e a segunda sincronização reinseria |
+
+Cada um virou um teste com nome próprio. É por isso que a suíte tem 442 testes para
+7.839 linhas de código.
+
+---
 
 ## Licença
 
-MIT
+MIT.
