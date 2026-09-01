@@ -1,10 +1,11 @@
 # Portfolio Tracker API
 
-Uma API que responde três perguntas sobre uma carteira da B3:
+Uma API que responde quatro perguntas sobre uma carteira da B3:
 
-1. **Quanto eu tenho?** — posição, preço médio, lucro e prejuízo
-2. **Fui bem?** — comparado ao CDI, à Selic, à inflação e ao Ibovespa
+1. **Quanto eu tenho?** — posição, preço médio, proventos, lucro e prejuízo
+2. **Fui bem?** — comparado à Selic, ao Ibovespa, ao CDI e à inflação
 3. **Poderia ser melhor?** — a fronteira eficiente de Markowitz, sobre os seus ativos
+4. **E se eu continuar?** — projeção por Monte Carlo, com aportes mensais
 
 Você registra as compras e vendas. Todo o resto é calculado a partir disso — não existe
 uma coluna "saldo" em lugar nenhum do banco.
@@ -12,10 +13,10 @@ uma coluna "saldo" em lugar nenhum do banco.
 ![Visão geral do painel](docs/img/visao-geral.jpg)
 
 **Stack:** Python 3.12 · FastAPI · SQLAlchemy 2.0 async · PostgreSQL 17 · Alembic ·
-pytest + testcontainers · uv · ruff · mypy strict
+NumPy/SciPy · pytest + testcontainers · uv · ruff · mypy strict
 
-**Tamanho:** 7.839 linhas em `app/`, 6.236 em testes, **442 testes**, 95% de cobertura,
-28 endpoints, 12 tabelas.
+**Tamanho:** 8.616 linhas em `app/`, 7.077 em testes, **507 testes**, 95% de cobertura,
+30 endpoints, 12 tabelas, 14 migrations.
 
 ---
 
@@ -30,6 +31,7 @@ pytest + testcontainers · uv · ruff · mypy strict
 - [A fronteira eficiente, sem fórmula](#a-fronteira-eficiente-sem-fórmula)
 - [Decisões que valem explicar](#decisões-que-valem-explicar)
 - [Erros que ficaram registrados](#erros-que-ficaram-registrados)
+- [O que ainda falta](#o-que-ainda-falta)
 
 ---
 
@@ -51,13 +53,14 @@ verdade pode morar, e um dia eles discordam: você apaga uma compra antiga e o s
 não acompanha. Com uma fonte só, **o extrato sempre explica o saldo** — porque o
 saldo *é* o extrato, somado.
 
-Isso governa três coisas que parecem separadas e não são:
+Isso governa quatro coisas que parecem separadas e não são:
 
 | Situação | O que acontece |
 |---|---|
 | Você apaga uma transação | O histórico do gráfico é reconstruído sozinho |
 | A TAEE11 paga dividendo | Quanto você recebeu vem de quantas cotas o livro dizia ter naquele dia |
 | A WEGE3 desdobra 2:1 | Suas 100 cotas viram 200 na leitura, e o livro nem é tocado |
+| A fronteira sugere 40% em PETR4 | As ordens saem da posição atual, recalculada na hora |
 
 ---
 
@@ -78,8 +81,6 @@ make api                    # sobe a API com reload
 Abra **http://localhost:8000/painel/** para a interface, ou
 **http://localhost:8000/docs** para a documentação interativa da API.
 
-Outros comandos:
-
 ```bash
 make testes      # roda a suíte
 make cobertura   # suíte com relatório de cobertura
@@ -90,7 +91,7 @@ make verificar   # tudo que o CI roda: lint, tipos e testes
 
 ## O caminho de um pedido
 
-Vamos seguir um `GET /portfolio/summary` do começo ao fim. Todo endpoint segue esse
+Vamos seguir um `GET /portfolio/summary` do começo ao fim. Todo endpoint segue o
 mesmo formato.
 
 ```
@@ -231,15 +232,15 @@ Se eu gravasse "o Bernardo recebeu R$ 27,00", criaria a chance dos dois discorda
 apagar uma compra antiga deixaria o provento gravado para sempre, referente a cotas
 que a carteira nunca teve.
 
-`benchmark_rates` é a única tabela sem ligação nenhuma — CDI e IPCA não pertencem a
-ativo nem a usuário, são só séries do Banco Central.
+`benchmark_rates` é a única tabela sem ligação nenhuma — Selic e Ibovespa não
+pertencem a ativo nem a usuário, são séries do mercado.
 
 ### Volumes hoje
 
 | Tabela | Linhas | O que é |
 |---|---:|---|
 | `price_history` | 37.268 | Um ano de fechamentos dos 151 ativos |
-| `benchmark_rates` | 486 | CDI, Selic, IPCA e Ibovespa, dia a dia |
+| `benchmark_rates` | 486 | Selic, CDI, IPCA e Ibovespa, dia a dia |
 | `assets` | 151 | Catálogo da B3 |
 | `portfolio_snapshots` | 77 | A foto diária das carteiras |
 | `dividends` | 54 | Proventos anunciados |
@@ -252,7 +253,7 @@ ativo nem a usuário, são só séries do Banco Central.
 
 ### Os módulos puros: matemática sem banco
 
-Estes quatro não sabem o que é SQL, HTTP ou ORM. Entram números, saem números — o
+Estes sete não sabem o que é SQL, HTTP ou ORM. Entram números, saem números — o
 que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
 
 | Arquivo | O que faz |
@@ -262,12 +263,14 @@ que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
 | **`services/optimizer.py`** | Markowitz. Recebe retornos esperados e covariância, devolve pesos. Resolve 50 problemas de otimização (SLSQP) para desenhar a fronteira. |
 | **`services/dividend.py`** | Quanto você recebeu, dada a data-com. E o desconto de 15% quando é JCP. |
 | **`services/split.py`** | Reescreve o livro nos termos de hoje. 100 ações antes de um 2:1 viram 200 a metade do preço — **e o custo total não muda**. |
+| **`services/rebalance.py`** | Do peso ideal para a ordem concreta. Ninguém compra 40%; compra 12 ações. |
+| **`services/simulation.py`** | Monte Carlo: milhares de caminhos futuros a partir da volatilidade da carteira. |
 
 ### As camadas que falam com o mundo
 
 | Pasta | Papel |
 |---|---|
-| **`app/routers/`** | Os 28 endpoints. Recebem, delegam, respondem. |
+| **`app/routers/`** | Os 30 endpoints. Recebem, delegam, respondem. |
 | **`app/services/*_service.py`** | Orquestram: leem do banco, chamam o módulo puro, gravam. |
 | **`app/models/`** | As tabelas, em SQLAlchemy. |
 | **`app/schemas/`** | A forma da resposta, em Pydantic. É aqui que se decide o que **não** sai. |
@@ -280,12 +283,12 @@ que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
 |---|---|---|
 | `clients/brapi.py` | brapi.dev | Cotação atual (fonte primária) |
 | `clients/yahoo.py` | Yahoo Finance | Cotação de reserva, **proventos** e **desdobramentos** |
-| `clients/bcb.py` | Banco Central (SGS) | CDI (série 12), Selic (11), IPCA (433) |
+| `clients/bcb.py` | Banco Central (SGS) | Selic (série 11), CDI (12), IPCA (433) |
 | `clients/ibov.py` | Yahoo Finance | Ibovespa — o BCB descontinuou a série em 2019 |
 | `clients/composto.py` | — | Encadeia brapi → Yahoo: se o primeiro falha, o segundo completa |
 
 Todos seguem a mesma regra: **falha externa nunca derruba a página.** Se o Banco
-Central está fora do ar, a carteira aparece sem a linha do CDI e com uma frase
+Central está fora do ar, a carteira aparece sem a linha da Selic e com uma frase
 explicando por quê — nunca um erro 500.
 
 ---
@@ -294,18 +297,50 @@ explicando por quê — nunca um erro 500.
 
 ### Posições
 
-Preço médio, cotação atual e resultado por ativo. O selo **`AJUSTADA`** aparece quando
-a quantidade foi corrigida por desdobramento — sem ele, você veria 200 cotas na posição
-e uma compra de 100 no extrato, e concluiria, com razão, que um dos dois está errado.
+Preço médio, cotação atual, resultado por ativo e a matriz de correlação. O selo
+**`AJUSTADA`** aparece quando a quantidade foi corrigida por desdobramento — sem ele,
+você veria 200 cotas na posição e uma compra de 100 no extrato, e concluiria, com
+razão, que um dos dois está errado.
 
 ![Tela de posições](docs/img/posicoes.jpg)
 
 ### Fronteira eficiente
 
 A nuvem de carteiras possíveis, a curva na borda, e dois pontos marcados: a de menor
-risco e a de melhor relação risco-retorno.
+risco e a de melhor relação risco-retorno. O ponto âmbar é a **sua** carteira hoje —
+normalmente fora da curva, que é o ponto do exercício.
 
 ![Fronteira eficiente](docs/img/fronteira.jpg)
+
+### Rebalanceamento
+
+A fronteira diz "40% em PETR4". Ninguém compra 40%: compra 65 ações. Esta tela faz a
+tradução, em dois modos.
+
+**Só comprar, com aporte** — não vende nada, logo não gera imposto sobre ganho nem
+realiza prejuízo só para acertar um peso. É como a maioria das pessoas rebalanceia.
+
+**Comprar e vender** — chega exatamente no alvo, e mostra quanto será vendido para
+você decidir se compensa o custo.
+
+![Rebalanceamento](docs/img/rebalancear.jpg)
+
+A tabela de baixo mostra a distância de cada ativo, **sem verde e vermelho**: estar
+acima do alvo não é lucro, é estar fora do lugar. O destaque é por magnitude — 2
+pontos raramente pagam a corretagem, 30 contam outra história.
+
+### Projeção (Monte Carlo)
+
+Uma projeção de linha única responde "quanto vou ter em 2036" — e responde errado,
+porque promete um número que não vai acontecer. Aqui são sorteados 10 mil caminhos a
+partir da volatilidade da própria carteira, e o que sai é uma **faixa**.
+
+![Projeção por Monte Carlo](docs/img/projecao.jpg)
+
+O campo de retorno esperado é **editável de propósito**. Ele vem preenchido com o
+número da carteira, mas esse número sai de estimativa histórica: uma carteira que
+subiu numa janela curta produz uma expectativa alta demais para projetar dez anos.
+Campo travado transformaria uma premissa discutível numa promessa.
 
 ### Transações
 
@@ -335,9 +370,9 @@ simplesmente pior.
 
 **Como o código calcula** (`services/optimizer.py`): escolhe um retorno-alvo, pergunta
 qual combinação o atinge com a menor volatilidade, e repete **50 vezes**. Sujeito a três
-regras: os pesos somam 100%, nenhum é negativo, e nenhum ativo passa de 40%.
+regras: os pesos somam 100%, nenhum é negativo, e nenhum ativo passa de um teto.
 
-Esse limite de 40% não é matemática, é bom senso enfiado no modelo à força. Sem ele, o
+Esse teto não é matemática, é bom senso enfiado no modelo à força. Sem ele, o
 otimizador rotineiramente joga quase tudo no papel que mais subiu na amostra —
 matematicamente ótimo para o passado, e o oposto de diversificar.
 
@@ -345,6 +380,11 @@ matematicamente ótimo para o passado, e o oposto de diversificar.
 > futuro. Ele não estima. Mude a janela de observação em alguns meses e a carteira ótima
 > muda completamente. O valor da fronteira é **mostrar o trade-off**, não entregar a
 > resposta certa.
+
+O mesmo vale para a projeção: os cenários saem de uma distribuição normal, que **não
+tem cauda gorda**. Crises reais são mais frequentes e mais profundas do que o modelo
+prevê, então o percentil 5 mostrado é otimista para o pior caso. Isso está escrito na
+tela e na resposta da API — quem consome o endpoint direto também precisa saber.
 
 ---
 
@@ -359,21 +399,30 @@ fronteira entre os dois mundos é explícita no código.
 **JWT escrito à mão, não uma biblioteca de auth.** Access token de 15 minutos em
 memória; refresh opaco de 384 bits em cookie `httpOnly`, guardado como SHA-256. Rotação
 a cada uso, com detecção de reuso: se um token já usado reaparece, a família inteira é
-revogada. Escrever isso ensinou mais do que instalar um pacote — e é a parte que um
-entrevistador mais gosta de perguntar.
+revogada. Escrever isso ensinou mais do que instalar um pacote.
 
 **O token nunca vai para o `localStorage`.** `localStorage` é legível por qualquer
 script da página: uma dependência comprometida entrega a sessão. Aqui o token vive numa
 variável e some ao fechar a aba; a sessão é retomada pelo cookie que o JavaScript não
 consegue ler.
 
-**Migrations, sempre — e lidas antes de rodar.** O `--autogenerate` já produziu, mais de
-uma vez, um `DROP CONSTRAINT` em restrições corretas. Aplicar sem ler teria deixado o
-banco aceitando qualquer string numa coluna que só deveria aceitar `compra` ou `venda`.
+**Regra de negócio mora no domínio, não no botão.** A carteira real não pode ser
+apagada — e a recusa está no serviço, devolvendo **409**, não no `hidden` do botão.
+Esconder o botão não protege nada: quem chamar a API direto passa por cima.
+
+**Migrations, sempre — e lidas antes de rodar.** O `--autogenerate` já produziu, duas
+vezes num mesmo dia, um `DROP CONSTRAINT` em restrições corretas. Aplicar sem ler teria
+deixado o banco aceitando qualquer string numa coluna que só deveria aceitar `compra`
+ou `venda`. Hoje os CHECK ficam fora da comparação, com o custo assumido em comentário.
 
 **`lazy="raise"` nos relacionamentos.** Um acesso não carregado levanta exceção em vez
 de disparar uma consulta em silêncio. É a diferença entre descobrir um N+1 no primeiro
-teste e descobrir em produção, seis meses depois, quando a página começa a demorar.
+teste e descobrir em produção, seis meses depois.
+
+**Testes verificados por mutação.** Um teste que não pode falhar não prova nada. Vários
+dos testes deste projeto foram reescritos depois de sobreviverem a uma quebra
+deliberada do código que diziam proteger — a contagem de testes não é garantia; a
+checagem é.
 
 ---
 
@@ -390,11 +439,28 @@ a única categoria de defeito que realmente assusta num app de dinheiro.
 | Duas abas deslogavam o usuário | Ambas renovavam com o mesmo token, e a detecção de reuso disparava |
 | O gráfico congelava | Apagar uma transação não invalidava os snapshots já gravados |
 | "Sem comparação" mostrava o CDI | O parâmetro tinha valor padrão, então *omitir* significava "use o padrão" |
-| O retorno vinha subestimado | Proventos não entravam na conta: na data-com o preço cai, e o dinheiro recebido não aparecia |
+| Datas apareciam como mm/dd/aaaa | O `<input type="date">` usa o idioma do **navegador**, não o da página |
+| O retorno vinha subestimado | Proventos não entravam: na data-com o preço cai, e o dinheiro recebido não aparecia |
 | Sincronizar duas vezes duplicava provento | Reclassificar liberava a vaga na chave primária, e a segunda sincronização reinseria |
+| Um dia sem cotação virava queda de 21% | O snapshot usava o custo como valor de mercado, inflando a volatilidade de 5,5% para 59,9% |
+| A posição mostrava metade das ações | Desdobramento muda a quantidade sem nenhuma transação acontecer |
 
-Cada um virou um teste com nome próprio. É por isso que a suíte tem 442 testes para
-7.839 linhas de código.
+Cada um virou um teste com nome próprio. É por isso que a suíte tem 507 testes para
+8.616 linhas de código.
+
+---
+
+## O que ainda falta
+
+Escrito aqui porque um README que só lista o que funciona conta meia história.
+
+- **Editar transação** — não existe `PUT` nem `PATCH` no app; corrigir um dígito exige
+  apagar e lançar de novo
+- **Recuperar e trocar senha** — o auth tem registro, login, refresh, logout e `/me`, e só
+- **Deploy** — o job diário de snapshot depende dele, e por isso os dados param quando
+  ninguém roda a carga localmente
+- **Imposto de renda** — deixado de fora conscientemente: é a regra mais fácil de errar,
+  e um erro aqui faz alguém recolher imposto errado
 
 ---
 
