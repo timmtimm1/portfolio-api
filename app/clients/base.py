@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date as date_type
 from decimal import Decimal
 from typing import Protocol
 
@@ -19,6 +20,21 @@ class Cotacao:
     ticker: str
     preco: Decimal
     fonte: str
+
+
+@dataclass(frozen=True)
+class ProventoBruto:
+    """Um provento como o FORNECEDOR informa, antes de virar linha no banco.
+
+    "Bruto" em dois sentidos: e o valor anunciado, sem desconto de retencao, e
+    e o dado cru do fornecedor, sem o tipo classificado. O Yahoo devolve data e
+    valor, e mais nada -- nao diz se foi dividendo ou JCP. Essa distincao vale
+    15% de imposto na fonte, entao ela nao pode ser chutada aqui; quem decide e
+    o servico, que grava como INDEFINIDO ate alguem corrigir.
+    """
+
+    data_com: date_type
+    valor_por_cota: Decimal
 
 
 class ProvedorDeCotacoes(Protocol):

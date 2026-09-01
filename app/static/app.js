@@ -355,6 +355,7 @@ async function carregarVisao() {
 
   ultimaEvolucao = evolucao;
   desenharEvolucao(evolucao);
+  carregarProventos().catch(() => {});
   renderPosicoesResumo(resumo.positions);
   renderOperacoesResumo(await api(comCarteira("/transactions?limit=5")));
 }
@@ -589,6 +590,102 @@ $("#indexador").addEventListener("change", () => {
 });
 $("#periodo").addEventListener("change", () => {
   carregarVisao().catch(() => {});
+});
+
+/* ═══ Proventos ═══ */
+
+const ROTULO_TIPO = {
+  dividendo: "Dividendo",
+  jcp: "JCP",
+  rendimento: "Rendimento",
+  indefinido: "A classificar",
+};
+
+async function carregarProventos() {
+  const dados = await api(comCarteira("/portfolio/dividends"));
+  const corpo = $("#tabela-proventos tbody");
+  const vazio = $("#proventos-vazio");
+  const selo = $("#selo-proventos");
+  const aviso = $("#proventos-aviso");
+  limpar(corpo);
+
+  if (!dados.proventos.length) {
+    $("#tabela-proventos").hidden = true;
+    selo.hidden = true;
+    aviso.hidden = true;
+    vazio.textContent =
+      "Nenhum provento registrado. Clique em “Buscar proventos” para consultar " +
+      "o histórico dos ativos desta carteira.";
+    vazio.hidden = false;
+    return;
+  }
+
+  $("#tabela-proventos").hidden = false;
+  vazio.hidden = true;
+
+  selo.textContent = `${brl.format(dados.total_liquido)} recebidos`;
+  selo.hidden = false;
+
+  const y = dados.yield_on_cost;
+  $("#sub-proventos").textContent =
+    y === null
+      ? "Dividendos, JCP e rendimentos recebidos"
+      : `Dividendos, JCP e rendimentos — ${pct(Number(y))} sobre o custo`;
+
+  // O aviso existe porque o número pode estar até 15% acima do real: o Yahoo
+  // não distingue dividendo de JCP, e JCP tem retenção na fonte. Exibir um
+  // total com falsa precisão seria pior do que exibir a ressalva.
+  if (dados.sem_classificacao > 0) {
+    const n = dados.sem_classificacao;
+    aviso.textContent =
+      `${n} provento${n > 1 ? "s" : ""} sem classificação: o fornecedor não ` +
+      "informa se foi dividendo ou JCP. Se for JCP, há 15% de imposto retido " +
+      "que ainda não está descontado.";
+    aviso.hidden = false;
+  } else {
+    aviso.hidden = true;
+  }
+
+  for (const p of dados.proventos) {
+    const tr = el("tr");
+    tr.append(el("td", null, dataBR(p.data_com)));
+    tr.append(el("td", null, p.ticker));
+
+    const tdTipo = el("td");
+    const pilula = el("span", "pilula-tipo", ROTULO_TIPO[p.tipo] || p.tipo);
+    pilula.dataset.tipo = p.tipo;
+    tdTipo.append(pilula);
+    tr.append(tdTipo);
+
+    tr.append(el("td", "num", num(p.quantidade)));
+    tr.append(el("td", "num", brl.format(p.valor_por_cota)));
+    tr.append(el("td", "num", brl.format(p.valor_bruto)));
+    tr.append(el("td", "num", brl.format(p.valor_liquido)));
+    corpo.append(tr);
+  }
+}
+
+$("#btn-sync-proventos").addEventListener("click", async (ev) => {
+  const botao = ev.currentTarget;
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = "Buscando…";
+  try {
+    // Uma requisição externa POR ATIVO no servidor: pode demorar. Desabilitar o
+    // botão evita a fila de cliques que estouraria o rate limit de 10/hora.
+    const r = await api(comCarteira("/portfolio/dividends/sync"), { method: "POST" });
+    await carregarProventos();
+    // Recarrega a visão inteira: o provento entra no retorno total, então o
+    // gráfico muda junto.
+    if (r.gravados > 0) invalidar();
+  } catch (e) {
+    const aviso = $("#proventos-aviso");
+    aviso.textContent = e.message;
+    aviso.hidden = false;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+  }
 });
 
 /* ═══ Posições ═══ */

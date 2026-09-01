@@ -243,3 +243,38 @@ class TestAvisoDeComparacaoFalha:
         deixaria o aviso visivel com texto vazio toda vez que desse certo."""
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         assert "aviso.hidden = !evolucao.motivo" in js
+
+
+class TestCartaoDeProventos:
+    """O cálculo de proventos existia sem aparecer em lugar nenhum.
+
+    Um endpoint que ninguém consome é trabalho que não serve para nada -- e
+    a Fase 1 só fecha quando o número chega à tela.
+    """
+
+    def test_o_cartao_existe_no_html(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="tabela-proventos"' in html
+        assert 'id="btn-sync-proventos"' in html
+
+    def test_a_visao_geral_carrega_os_proventos(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "carregarProventos()" in js
+        assert "/portfolio/dividends" in js
+
+    def test_avisa_sobre_proventos_sem_classificacao(self) -> None:
+        """O Yahoo não distingue dividendo de JCP, e JCP tem 15% retidos. Um
+        total exibido sem essa ressalva tem falsa precisão -- pode estar até
+        15% acima do que caiu na conta."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "sem_classificacao" in js, (
+            "o total pode estar 15% acima do real enquanto houver provento "
+            "sem tipo; a tela precisa dizer isso"
+        )
+
+    def test_sincronizar_recarrega_o_grafico(self) -> None:
+        """Provento entra no retorno TOTAL, então buscar proventos novos muda o
+        gráfico de evolução -- não só a tabela de proventos."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.find("btn-sync-proventos") :]
+        assert "invalidar()" in trecho[:1200]

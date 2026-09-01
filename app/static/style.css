@@ -410,6 +410,28 @@ h1, h2, h3, p { margin: 0; }
 
 .grade-baixo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 
+/* Proventos: cartao proprio, largura inteira, abaixo da grade de dois.
+   Entrar na `.grade-baixo` como terceira coluna espremeria as tres; um cartao
+   separado nao mexe em nada do que ja estava posicionado. */
+.cartao-proventos { margin-top: 18px; }
+.selo-proventos {
+  font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+  background: rgba(53, 214, 232, .14); color: #35d6e8; white-space: nowrap;
+}
+.vazio-proventos {
+  color: var(--txt-3); font-size: 13px; line-height: 1.7; padding: 22px 0 6px;
+}
+.pilula-tipo {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  padding: 2.5px 8px; border-radius: 999px; text-transform: uppercase;
+}
+.pilula-tipo[data-tipo="dividendo"]  { background: rgba(53, 214, 232, .15); color: #35d6e8; }
+.pilula-tipo[data-tipo="jcp"]        { background: rgba(245, 181, 74, .15); color: #f5b54a; }
+.pilula-tipo[data-tipo="rendimento"] { background: rgba(123, 92, 255, .18); color: #a78bfa; }
+/* Indefinido em cinza, de proposito: nao e uma categoria, e a ausencia de uma.
+   Colori-lo como as outras sugeriria uma informacao que nao temos. */
+.pilula-tipo[data-tipo="indefinido"] { background: rgba(255, 255, 255, .07); color: var(--txt-3); }
+
 /* ══ Listas ══ */
 .lista { display: grid; gap: 8px; }
 .linha {

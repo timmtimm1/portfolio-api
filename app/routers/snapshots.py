@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date as date_type
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
@@ -19,7 +20,7 @@ from app.schemas.evolution import (
     RentabilidadePoint,
 )
 from app.schemas.snapshot import SnapshotRead, SnapshotRunResult
-from app.services import benchmark_service, snapshot_service
+from app.services import benchmark_service, dividend_service, snapshot_service
 
 router = APIRouter(tags=["snapshots"])
 
@@ -102,9 +103,21 @@ async def evolucao(
     )
     pontos = [SnapshotRead.model_validate(s) for s in snapshots]
 
+    # Proventos por data-com, para entrarem no retorno TOTAL. Sem isto o
+    # grafico mede so valorizacao, e uma carteira de dividendo (TAEE11, ITUB4)
+    # aparece cronicamente pior do que foi: na data-com o preco cai o valor do
+    # provento, o snapshot registra a queda, e o dinheiro recebido nao aparece
+    # em lugar nenhum.
+    recebidos = await dividend_service.da_carteira(db, carteira.id)
+    proventos_por_dia: dict[date_type, Decimal] = {}
+    for r in recebidos:
+        # Soma acumulada: dois ativos podem ter data-com no mesmo dia.
+        anterior = proventos_por_dia.get(r.data_com, Decimal(0))
+        proventos_por_dia[r.data_com] = anterior + r.valor_liquido
+
     rentabilidade = [
         RentabilidadePoint(date=p.date, carteira=p.carteira, benchmark=p.benchmark)
-        for p in benchmark_service.curva_rentabilidade(snapshots, taxas)
+        for p in benchmark_service.curva_rentabilidade(snapshots, taxas, proventos_por_dia)
     ]
 
     # `indexador is None` e redundante em runtime (sem indexador a curva vem

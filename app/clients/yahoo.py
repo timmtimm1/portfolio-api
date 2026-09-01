@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from datetime import date as date_type
 from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from app.clients.base import Cotacao
+from app.clients.base import Cotacao, ProventoBruto
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+
+# O endpoint so aceita janela relativa, nao data inicial e final. Pedimos uma
+# janela larga e filtramos em memoria -- 10 anos cobre qualquer carteira de
+# pessoa fisica, e o resultado e cacheado no banco, entao a chamada e rara.
+JANELA_PROVENTOS = "10y"
 
 
 class YahooClient:
@@ -60,3 +67,59 @@ class YahooClient:
             return None
 
         return Cotacao(ticker, valor, "yahoo") if valor > 0 else None
+
+    async def proventos(self, ticker: str, desde: date_type, ate: date_type) -> list[ProventoBruto]:
+        """Dividendos e JCP anunciados no periodo, por cota.
+
+        Mesmo endpoint da cotacao, com `events=div`: o Yahoo devolve os eventos
+        de provento junto com a serie. Cada evento traz a DATA-COM (nao a de
+        pagamento) e o valor bruto por cota -- e nao diz se foi dividendo ou
+        JCP, o que fica a cargo de quem grava.
+
+        Devolve lista vazia em qualquer falha, mesma regra do resto do modulo:
+        um ativo sem provento e um fornecedor fora do ar produzem o mesmo
+        resultado visivel, e nenhum dos dois pode derrubar a carteira.
+        """
+        try:
+            resposta = await self._client.get(
+                f"{BASE_URL}/{ticker}.SA",
+                params={"range": JANELA_PROVENTOS, "interval": "1d", "events": "div"},
+            )
+            resposta.raise_for_status()
+            dados = resposta.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "[yahoo] falha ao buscar proventos de %s: %s", ticker, type(exc).__name__
+            )
+            return []
+
+        return self._extrair_proventos(dados, desde, ate)
+
+    @staticmethod
+    def _extrair_proventos(dados: object, desde: date_type, ate: date_type) -> list[ProventoBruto]:
+        """Le `chart.result[0].events.dividends`, que e um dicionario com o
+        timestamp como CHAVE e `{amount, date}` como valor."""
+        try:
+            eventos = dados["chart"]["result"][0]["events"]["dividends"]  # type: ignore[index]
+        except (KeyError, IndexError, TypeError):
+            return []
+        if not isinstance(eventos, dict):
+            return []
+
+        proventos: list[ProventoBruto] = []
+        for evento in eventos.values():
+            if not isinstance(evento, dict):
+                continue
+            try:
+                # O timestamp cai durante o pregao (13h-21h UTC, horario da B3
+                # em UTC-3) e nunca cruza a meia-noite UTC, entao a data em UTC
+                # e a data-com correta sem converter fuso.
+                dia = datetime.fromtimestamp(evento["date"], tz=UTC).date()
+                valor = Decimal(str(evento["amount"]))
+            except (KeyError, TypeError, ValueError, InvalidOperation, OSError):
+                continue
+            if valor > 0 and desde <= dia <= ate:
+                proventos.append(ProventoBruto(dia, valor))
+
+        proventos.sort(key=lambda p: p.data_com)
+        return proventos

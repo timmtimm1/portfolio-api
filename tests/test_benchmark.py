@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.bcb import BcbClient
 from app.clients.ibov import IbovClient
 from app.models.benchmark import BenchmarkRate, Indexador
-from app.services.benchmark_service import curva_equivalente
+from app.services.benchmark_service import curva_equivalente, curva_rentabilidade
 from tests.factories import criar_ativo, op, usuario_logado
 
 
@@ -613,3 +613,93 @@ class TestCurvaDeRentabilidade:
         snaps = [Snap(d(1), Decimal(1000), Decimal(1000)), Snap(d(2), Decimal(1000), Decimal(1100))]
         curva = curva_rentabilidade(snaps, {})  # type: ignore[arg-type]
         assert all(p.benchmark is None for p in curva)
+
+
+class TestProventosNoRetorno:
+    """Retorno TOTAL, não só valorização.
+
+    Na data-com o preço cai aproximadamente o valor do provento -- a empresa
+    distribuiu caixa, então vale menos. O snapshot registra essa queda. Se o
+    provento não voltar ao numerador, a carteira aparece perdendo exatamente o
+    que ganhou, e uma carteira de dividendo fica cronicamente subestimada.
+    """
+
+    @staticmethod
+    def _snaps() -> list[Snap]:
+        """Dois dias, sem aporte novo. O valor de mercado cai de 1000 para 990
+        -- exatamente o provento de R$ 10 que foi distribuído."""
+        return [
+            Snap(d(1), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(2), Decimal(1000), valor_mercado=Decimal(990)),
+        ]
+
+    def test_sem_proventos_a_queda_da_data_com_vira_prejuizo(self) -> None:
+        """O comportamento ANTIGO, que era errado para quem recebe dividendo:
+        -1% de retorno num dia em que o investidor não perdeu nada."""
+        curva = curva_rentabilidade(self._snaps(), {})  # type: ignore[arg-type]
+        assert curva[-1].carteira == Decimal("-0.01")
+
+    def test_com_provento_o_retorno_volta_a_zero(self) -> None:
+        """(990 + 10 - 0) / 1000 - 1 = 0. O dinheiro saiu da cotação e entrou
+        na conta -- não evaporou."""
+        curva = curva_rentabilidade(
+            self._snaps(),  # type: ignore[arg-type]
+            {},
+            {d(2): Decimal(10)},
+        )
+        assert curva[-1].carteira == Decimal(0)
+
+    def test_provento_em_dia_sem_queda_e_ganho_real(self) -> None:
+        """Preço estável e provento recebido = retorno positivo, e não zero."""
+        snaps = [
+            Snap(d(1), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(2), Decimal(1000), valor_mercado=Decimal(1000)),
+        ]
+        curva = curva_rentabilidade(snaps, {}, {d(2): Decimal(50)})  # type: ignore[arg-type]
+        assert curva[-1].carteira == Decimal("0.05")
+
+    def test_proventos_de_dias_diferentes_compoem(self) -> None:
+        """Retorno acumulado é produto, não soma: 1,01 × 1,01 = 1,0201."""
+        snaps = [
+            Snap(d(1), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(2), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(3), Decimal(1000), valor_mercado=Decimal(1000)),
+        ]
+        curva = curva_rentabilidade(
+            snaps,  # type: ignore[arg-type]
+            {},
+            {d(2): Decimal(10), d(3): Decimal(10)},
+        )
+        assert curva[-1].carteira == Decimal("0.0201")
+
+    def test_dia_sem_provento_nao_e_afetado(self) -> None:
+        """Só a data-com recebe o crédito. Um dicionário de proventos não pode
+        vazar para os outros dias."""
+        snaps = [
+            Snap(d(1), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(2), Decimal(1000), valor_mercado=Decimal(1000)),
+            Snap(d(3), Decimal(1000), valor_mercado=Decimal(1000)),
+        ]
+        curva = curva_rentabilidade(snaps, {}, {d(2): Decimal(10)})  # type: ignore[arg-type]
+        assert curva[1].carteira == Decimal("0.01")
+        assert curva[2].carteira == Decimal("0.01")  # inalterado no dia 3
+
+    def test_omitir_proventos_mantem_o_comportamento_anterior(self) -> None:
+        """O parâmetro é opcional: quem chama sem ele mede só valorização, como
+        antes. Isso protege os outros chamadores de mudarem de significado sem
+        ninguém perceber."""
+        snaps = self._snaps()
+        assert curva_rentabilidade(snaps, {}) == curva_rentabilidade(snaps, {}, None)  # type: ignore[arg-type]
+
+    def test_provento_e_somado_junto_com_o_aporte_do_dia(self) -> None:
+        """Aporte e provento no mesmo dia não podem se anular. O aporte SAI do
+        numerador (dinheiro novo não é lucro); o provento ENTRA (é lucro)."""
+        snaps = [
+            Snap(d(1), Decimal(1000), valor_mercado=Decimal(1000)),
+            # Aportou 500, e o valor foi para 1510: 1000 + 500 de aporte + 10
+            # de mercado. Recebeu ainda R$ 10 de provento.
+            Snap(d(2), Decimal(1500), valor_mercado=Decimal(1510)),
+        ]
+        curva = curva_rentabilidade(snaps, {}, {d(2): Decimal(10)})  # type: ignore[arg-type]
+        # (1510 + 10 - 500) / 1000 - 1 = 0,02
+        assert curva[-1].carteira == Decimal("0.02")

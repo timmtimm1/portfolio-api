@@ -20,6 +20,7 @@ __all__ = [
     "get_http_client",
     "get_ibov_client",
     "get_provedor_de_cotacoes",
+    "get_yahoo_client",
 ]
 
 
@@ -66,6 +67,18 @@ def get_provedor_de_cotacoes() -> ProvedorDeCotacoes:
 def get_bcb_client() -> BcbClient:
     """Cliente do Banco Central, compartilhando o mesmo pool HTTP."""
     return BcbClient(get_http_client())
+
+
+@lru_cache
+def get_yahoo_client() -> YahooClient:
+    """Yahoo isolado, para proventos.
+
+    O `ProvedorEncadeado` de cotacoes esconde qual fornecedor respondeu, o
+    que e certo para preco. Para proventos, porem, so o Yahoo tem o dado
+    (a brapi exige token, e o `.env` local esta sem) -- entao o chamador
+    precisa do cliente concreto, nao da cadeia.
+    """
+    return YahooClient(get_http_client())
 
 
 @lru_cache

@@ -10,10 +10,16 @@ from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import get_bcb_client, get_ibov_client, get_provedor_de_cotacoes
+from app.clients import (
+    get_bcb_client,
+    get_ibov_client,
+    get_provedor_de_cotacoes,
+    get_yahoo_client,
+)
 from app.clients.base import ProvedorDeCotacoes
 from app.clients.bcb import BcbClient
 from app.clients.ibov import IbovClient
+from app.clients.yahoo import YahooClient
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import decode_token
@@ -79,6 +85,7 @@ ProvedorDep = Annotated[ProvedorDeCotacoes, Depends(get_provedor_de_cotacoes)]
 
 BcbDep = Annotated[BcbClient, Depends(get_bcb_client)]
 IbovDep = Annotated[IbovClient, Depends(get_ibov_client)]
+YahooDep = Annotated[YahooClient, Depends(get_yahoo_client)]
 
 
 async def get_carteira(

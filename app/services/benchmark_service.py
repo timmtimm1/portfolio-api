@@ -237,9 +237,15 @@ async def evolucao_comparada(
 
 
 def curva_rentabilidade(
-    snapshots: list[PortfolioSnapshot], taxas: dict[date_type, Decimal]
+    snapshots: list[PortfolioSnapshot],
+    taxas: dict[date_type, Decimal],
+    proventos: dict[date_type, Decimal] | None = None,
 ) -> list[PontoRentabilidade]:
     """Rentabilidade acumulada da carteira e do indexador, ambas partindo de 0%.
+
+    `proventos` mapeia data-com -> valor liquido recebido naquele dia. Opcional
+    para nao quebrar quem chama sem ele, mas omitir significa medir apenas
+    valorizacao, e nao retorno total.
 
     ## Por que NAO e `valor_mercado / custo_total - 1`
 
@@ -254,7 +260,7 @@ def curva_rentabilidade(
 
     ## O que usamos: retorno ponderado pelo tempo (TWR)
 
-        r[t] = (valor[t] - aporte[t]) / valor[t-1] - 1
+        r[t] = (valor[t] + provento[t] - aporte[t]) / valor[t-1] - 1
         acumulado[t] = acumulado[t-1] * (1 + r[t])
 
     Subtrair o aporte do valor final isola o efeito do MERCADO daquele dia. No
@@ -266,6 +272,7 @@ def curva_rentabilidade(
     if not snapshots:
         return []
 
+    proventos = proventos or {}
     curva = [PontoRentabilidade(snapshots[0].date, ZERO, ZERO if taxas else None)]
 
     acumulado_carteira = Decimal(1)
@@ -276,11 +283,22 @@ def curva_rentabilidade(
     for ponto in snapshots[1:]:
         aporte = ponto.custo_total - custo_anterior
 
+        # Provento recebido no dia SOMA no numerador.
+        #
+        # Na data-com o preco cai aproximadamente o valor do provento -- a
+        # empresa distribuiu caixa, entao vale menos. O snapshot registra essa
+        # queda, mas o dinheiro nao evaporou: saiu da cotacao e entrou na conta.
+        # Sem somar de volta, a carteira aparece perdendo exatamente o que
+        # ganhou, e um bom pagador de dividendo (TAEE11, ITUB4) fica com
+        # retorno cronicamente subestimado. Isto e retorno TOTAL, que e o que
+        # fundos reportam e a unica coisa comparavel com o CDI acumulado.
+        recebido = proventos.get(ponto.date, ZERO)
+
         # Valor anterior zero acontece: carteira zerada e depois reaberta. Nao ha
         # base para calcular retorno, entao o dia nao rende -- em vez de dividir
         # por zero ou inventar um numero.
         if valor_anterior > ZERO:
-            retorno = (ponto.valor_mercado - aporte) / valor_anterior - 1
+            retorno = (ponto.valor_mercado + recebido - aporte) / valor_anterior - 1
             acumulado_carteira *= 1 + retorno
 
         acumulado_benchmark *= 1 + taxas.get(ponto.date, ZERO)
