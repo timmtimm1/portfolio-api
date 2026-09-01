@@ -17,6 +17,7 @@ from app.models.asset import Asset
 from app.models.portfolio import Portfolio
 from app.models.transaction import Transaction, TransactionSide
 from app.schemas.transaction import TransactionCreate
+from app.services import split, split_service
 from app.services.exceptions import DomainError
 from app.services.position import Posicao, calcular_posicoes
 
@@ -91,7 +92,11 @@ async def criar(db: AsyncSession, carteira: Portfolio, dados: TransactionCreate)
     # Objeto leve so para a validacao: nao adicionamos a transacao a sessao antes
     # de ter certeza, para nao depender de rollback para desfazer.
     novo = _Candidata(ativo.ticker, dados)
-    calcular_posicoes([*existentes, novo])  # levanta VendaSemPosicaoError
+    # O livro precisa estar AJUSTADO aqui, nao so na leitura. Quem comprou 100
+    # acoes antes de um desdobramento 2:1 tem 200 hoje e pode vender 150 -- com
+    # o livro cru, essa venda legitima seria recusada como venda a descoberto.
+    eventos = await split_service.dos_ativos(db, {ativo.id})
+    calcular_posicoes(split.ajustar([*existentes, novo], eventos))
 
     db.add(transacao)
     await db.commit()
@@ -188,8 +193,9 @@ async def remover(db: AsyncSession, portfolio_id: uuid.UUID, transacao_id: uuid.
     await db.flush()
 
     restantes = await _carregar_do_ativo(db, portfolio_id, asset_id)
+    eventos = await split_service.dos_ativos(db, {asset_id})
     try:
-        calcular_posicoes(restantes)
+        calcular_posicoes(split.ajustar(restantes, eventos))
     except DomainError:
         await db.rollback()
         raise
@@ -199,12 +205,31 @@ async def remover(db: AsyncSession, portfolio_id: uuid.UUID, transacao_id: uuid.
 
 
 async def posicoes(db: AsyncSession, portfolio_id: uuid.UUID) -> list[Posicao]:
-    """Posicoes consolidadas, reconstruidas do livro.
+    """Posicoes consolidadas, reconstruidas do livro e ajustadas por eventos.
 
-    Uma consulta traz todas as transacoes com os ativos (`selectinload`), e o
-    calculo roda em memoria. A alternativa -- uma consulta por ativo -- seria
-    N+1 disfarcado de "codigo organizado".
+    Duas consultas: uma traz as transacoes com os ativos (`selectinload`),
+    outra traz os desdobramentos desses ativos. O calculo roda em memoria. A
+    alternativa -- uma consulta por ativo -- seria N+1 disfarcado de "codigo
+    organizado".
+
+    ## Por que o ajuste acontece AQUI
+
+    Este e o unico caminho pelo qual uma posicao nasce: o resumo, os
+    snapshots, a fronteira e os proventos todos passam por ele. Ajustar em um
+    ponto so garante que nao existe um lugar do sistema onde a WEGE3 tem 100
+    acoes e outro onde ela tem 200 -- o tipo de divergencia que ninguem nota
+    ate um numero nao fechar.
+
+    O livro no banco NAO e reescrito. Ele guarda o que a pessoa realmente
+    fez; o ajuste e uma leitura em cima disso, refeita a cada consulta. Um
+    evento corrigido ou removido depois corrige a carteira sozinho, sem
+    migracao de dados -- mesma escolha do preco medio e dos proventos.
     """
     stmt = _da_carteira(portfolio_id).options(selectinload(Transaction.asset))
     transacoes = list((await db.execute(stmt)).scalars().all())
-    return sorted(calcular_posicoes(transacoes).values(), key=lambda p: p.ticker)
+    if not transacoes:
+        return []
+
+    eventos = await split_service.dos_ativos(db, {t.asset_id for t in transacoes})
+    ajustadas = split.ajustar(transacoes, eventos)
+    return sorted(calcular_posicoes(ajustadas).values(), key=lambda p: p.ticker)

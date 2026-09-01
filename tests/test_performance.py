@@ -41,19 +41,44 @@ async def test_listagem_nao_faz_n_mais_1(
 async def test_posicoes_nao_fazem_n_mais_1(
     client: AsyncClient, db: AsyncSession, contar_queries: list[str]
 ) -> None:
-    """O calculo de posicao le o livro inteiro. Precisa ler em duas consultas,
-    nao numa por ativo."""
-    for t in ("PETR4", "VALE3", "ITUB4", "BBAS3"):
+    """O calculo de posicao le o livro inteiro, e depois os desdobramentos dos
+    ativos que aparecem nele. Tem que ser um numero FIXO de consultas, nao uma
+    por ativo.
+
+    Em vez de um teto arbitrario, o teste roda com dois volumes diferentes e
+    exige o mesmo numero: e isso que distingue "constante" de "pequeno". Um
+    teto sozinho passaria com quatro ativos e escondereia o N+1 ate a carteira
+    crescer.
+    """
+    tickers = ("PETR4", "VALE3", "ITUB4", "BBAS3", "WEGE3", "TAEE11", "BBDC4", "MGLU3")
+
+    for t in tickers[:2]:
         await criar_ativo(db, ticker=t)
     _, h = await usuario_logado(client)
-    for t in ("PETR4", "VALE3", "ITUB4", "BBAS3"):
+    for t in tickers[:2]:
         await client.post("/transactions", json=op(ticker=t, quantity="10"), headers=h)
 
     contar_queries.clear()
     resp = await client.get("/portfolio/positions", headers=h)
+    com_dois = len(contar_queries)
+    assert len(resp.json()) == 2
 
-    assert len(resp.json()) == 4
-    assert len(contar_queries) <= 4, "\n".join(contar_queries)
+    for t in tickers[2:]:
+        await criar_ativo(db, ticker=t)
+    for t in tickers[2:]:
+        await client.post("/transactions", json=op(ticker=t, quantity="10"), headers=h)
+
+    contar_queries.clear()
+    resp = await client.get("/portfolio/positions", headers=h)
+    com_oito = len(contar_queries)
+
+    assert len(resp.json()) == 8
+    assert com_oito == com_dois, (
+        f"{com_dois} consultas com 2 ativos e {com_oito} com 8 -- o numero cresceu "
+        "com a carteira, que e a assinatura do N+1:\n" + "\n".join(contar_queries)
+    )
+    # 1 usuario + 1 carteira + 1 transacoes + 1 ativos + 1 desdobramentos.
+    assert com_oito <= 5, "\n".join(contar_queries)
 
 
 async def test_acesso_nao_carregado_ao_ativo_levanta_excecao(

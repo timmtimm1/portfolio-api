@@ -22,7 +22,7 @@ from app.clients.yahoo import YahooClient
 from app.models.asset import Asset
 from app.models.dividend import Dividend, TipoProvento
 from app.models.transaction import Transaction
-from app.services import dividend
+from app.services import dividend, split, split_service
 from app.services.dividend import ProventoRecebido
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,12 @@ async def da_carteira(
         for linha, ticker in (await db.execute(stmt)).all()
     ]
 
-    return dividend.recebidos(transacoes, proventos)
+    # O livro vai AJUSTADO por desdobramento. O Yahoo ja ajusta o historico de
+    # proventos, entao os dois lados precisam falar a mesma unidade: quantidade
+    # ajustada x provento ajustado. Cruzar um lado ajustado com outro cru
+    # erraria exatamente pelo fator do evento.
+    eventos = await split_service.dos_ativos(db, ids_ativos)
+    return dividend.recebidos(split.ajustar(transacoes, eventos), proventos)
 
 
 async def reclassificar(

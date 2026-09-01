@@ -72,10 +72,19 @@ class DividendSummary(BaseModel):
 
 
 class DividendSyncResult(BaseModel):
-    """Resultado da sincronização com o fornecedor."""
+    """Resultado da sincronização de eventos corporativos.
+
+    Proventos e desdobramentos vêm juntos porque saem da mesma fonte e do
+    mesmo gesto do usuário ("atualize os eventos desta carteira"). Separá-los
+    em dois botões faria alguém rodar um e esquecer o outro -- e uma carteira
+    com proventos atualizados e desdobramento faltando mostra número errado.
+    """
 
     tickers_consultados: list[str]
     gravados: int = Field(description="Proventos novos; repetir a sincronizacao devolve 0")
+    desdobramentos: int = Field(
+        default=0, description="Desdobramentos, grupamentos e bonificacoes novos"
+    )
 
 
 class DividendReclassify(BaseModel):

@@ -14,6 +14,7 @@ from app.models.portfolio import Portfolio, TipoCarteira
 from app.models.quote import PriceQuote
 from app.models.refresh_token import MotivoRevogacao, RefreshToken
 from app.models.snapshot import PortfolioSnapshot
+from app.models.split import Split
 from app.models.transaction import Transaction, TransactionSide
 from app.models.user import User
 
@@ -32,6 +33,7 @@ __all__ = [
     "MotivoRevogacao",
     "PriceQuote",
     "RefreshToken",
+    "Split",
     "Transaction",
     "TransactionSide",
     "User",

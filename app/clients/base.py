@@ -37,6 +37,19 @@ class ProventoBruto:
     valor_por_cota: Decimal
 
 
+@dataclass(frozen=True)
+class DesdobramentoBruto:
+    """Um evento corporativo como o fornecedor informa.
+
+    Numerador e denominador separados, e nao a razao: 1:3 daria 0.3333... e
+    guardar isso arredondado espalharia o erro por todo o historico ajustado.
+    """
+
+    data_ex: date_type
+    numerador: Decimal
+    denominador: Decimal
+
+
 class ProvedorDeCotacoes(Protocol):
     """Um fornecedor sabe buscar varios tickers de uma vez.
 

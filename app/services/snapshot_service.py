@@ -21,7 +21,7 @@ from app.models.snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.snapshot import SnapshotRunResult
-from app.services import quote_service, transaction_service
+from app.services import quote_service, split, split_service, transaction_service
 from app.services.position import Posicao, calcular_posicoes
 
 logger = logging.getLogger(__name__)
@@ -230,9 +230,25 @@ async def backfill(
     dias = sorted({dia for _, dia in fechamentos})
     linhas = []
 
+    # Eventos corporativos do periodo, aplicados ao livro antes de qualquer
+    # conta.
+    #
+    # ## A premissa, dita em voz alta
+    #
+    # O ajuste poe a quantidade em termos de HOJE, e a serie de `price_history`
+    # precisa estar na mesma unidade -- ou seja, com os fechamentos historicos
+    # tambem restados pelo desdobramento, que e o que "preco ajustado" significa
+    # e o que todo fornecedor de dado faz por padrao.
+    #
+    # Se a serie fosse crua, quantidade de hoje vezes preco de ontem erraria
+    # pelo fator do evento. Vale conferir a convencao da origem antes de
+    # confiar num historico que atravesse um desdobramento grande.
+    eventos = await split_service.dos_ativos(db, {t.asset_id for t in transacoes})
+    ajustadas = split.ajustar(transacoes, eventos)
+
     for dia in dias:
         # Recalcula a posicao com o livro ATE aquele dia, nao o livro inteiro.
-        ate_o_dia = [t for t in transacoes if t.traded_at <= dia]
+        ate_o_dia = [t for t in ajustadas if t.traded_at <= dia]
         if not ate_o_dia:
             continue
         posicoes = calcular_posicoes(ate_o_dia)

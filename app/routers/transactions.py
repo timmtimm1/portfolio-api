@@ -29,6 +29,7 @@ from app.services import (
     dividend_service,
     portfolio_service,
     snapshot_service,
+    split_service,
     transaction_service,
 )
 from app.services.position import VendaSemPosicaoError
@@ -283,8 +284,20 @@ async def sincronizar_proventos(
     # Um ano para trás por padrão: cobre o ciclo completo de qualquer pagador
     # sem puxar década de histórico que ninguém vai olhar.
     inicio = desde or (date_type.today() - timedelta(days=365))
-    gravados = await dividend_service.sincronizar(db, yahoo, tickers, inicio, date_type.today())
-    return DividendSyncResult(tickers_consultados=tickers, gravados=gravados)
+    hoje = date_type.today()
+    gravados = await dividend_service.sincronizar(db, yahoo, tickers, inicio, hoje)
+
+    # Desdobramentos vao com uma janela MUITO maior que a dos proventos: um
+    # evento de 2018 ainda ajusta uma compra de 2019, enquanto um provento de
+    # 2018 nao interessa a quem comprou depois. Perder um desdobramento antigo
+    # deixa a posicao errada para sempre; perder um provento antigo so deixa de
+    # somar algo que nao era da carteira mesmo.
+    desdobramentos = await split_service.sincronizar(
+        db, yahoo, tickers, hoje - timedelta(days=365 * 20), hoje
+    )
+    return DividendSyncResult(
+        tickers_consultados=tickers, gravados=gravados, desdobramentos=desdobramentos
+    )
 
 
 @router.post(
