@@ -319,9 +319,19 @@ document.addEventListener("click", (ev) => {
 
 async function carregarVisao() {
   const indexador = $("#indexador").value;
+  // "Tudo" (value="") não manda `desde` -- a API já limita em `limit`. Um
+  // período em dias vira uma data de corte; a partir dela o backend filtra
+  // ANTES de contar o limite, então "1 ano" não trunca no meio do ano por
+  // causa de `limit`.
+  const dias = $("#periodo").value;
+  const filtroPeriodo = dias ? `&desde=${isoMenosDias(Number(dias))}` : "";
   const [resumo, evolucao] = await Promise.all([
     api(comCarteira("/portfolio/summary")),
-    api(comCarteira(`/portfolio/evolution?limit=250${indexador ? `&indexador=${indexador}` : ""}`)),
+    api(
+      comCarteira(
+        `/portfolio/evolution?limit=500${indexador ? `&indexador=${indexador}` : ""}${filtroPeriodo}`
+      )
+    ),
   ]);
 
   const t = resumo.totals;
@@ -566,6 +576,9 @@ document.querySelectorAll("[data-escala]").forEach((botao) => {
 });
 
 $("#indexador").addEventListener("change", () => {
+  carregarVisao().catch(() => {});
+});
+$("#periodo").addEventListener("change", () => {
   carregarVisao().catch(() => {});
 });
 

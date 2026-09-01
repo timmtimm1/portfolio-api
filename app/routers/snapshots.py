@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.core.deps import BcbDep, CarteiraAtual, DbDep, ProvedorDep, SettingsDep
+from app.core.deps import BcbDep, CarteiraAtual, DbDep, IbovDep, ProvedorDep, SettingsDep
 from app.core.rate_limit import limiter
 from app.core.service_auth import ChaveDeServico
 from app.models.benchmark import Indexador
@@ -51,37 +51,66 @@ async def historico(
 @router.get(
     "/portfolio/evolution",
     response_model=EvolutionResponse,
-    summary="Evolucao da carteira comparada ao CDI ou a Selic",
+    summary="Evolucao da carteira, opcionalmente comparada a CDI, Selic, IPCA ou Ibovespa",
 )
 async def evolucao(
     carteira: CarteiraAtual,
     db: DbDep,
     bcb: BcbDep,
-    indexador: Annotated[Indexador, Query(description="cdi ou selic")] = Indexador.CDI,
+    ibov: IbovDep,
+    indexador: Annotated[
+        Indexador | None,
+        Query(description="cdi, selic, ipca ou ibov; omita para nao comparar com nada"),
+    ] = None,
     desde: Annotated[date_type | None, Query()] = None,
     ate: Annotated[date_type | None, Query()] = None,
     limit: Annotated[int, Query(ge=2, le=LIMITE_MAXIMO)] = 250,
 ) -> EvolutionResponse:
-    """A carteira contra o CDI, respondendo "eu bati o CDI?".
+    """A carteira contra um indexador, respondendo "eu bati o CDI?" ou, com
+    `indexador=ipca`, "meu dinheiro cresceu de verdade ou so acompanhou os
+    precos?" -- a mesma pergunta de rentabilidade REAL, sem precisar de um
+    campo novo: `comparacao.excesso_pontos_percentuais` contra o IPCA JA E o
+    ganho acima da inflacao no periodo.
+
+    A comparacao e OPT-IN. O default e `None` -- sem indexador, sem curva -- e
+    nao `CDI`, porque um default de valor tornaria "sem comparacao" impossivel
+    de pedir: omitir o parametro significaria "use o default", e o cliente nao
+    teria como dizer "nenhum". O painel manda `indexador=cdi` explicitamente
+    quando quer o CDI, entao a tela abre igual.
 
     A curva do indexador nao e a taxa acumulada pura: e quanto o MESMO dinheiro,
-    aplicado nos MESMOS dias, renderia no CDI. Isso importa quando ha aportes --
-    aplicar a taxa so sobre o valor inicial subestima o benchmark e faz a
-    carteira parecer melhor do que foi.
+    aplicado nos MESMOS dias, renderia no indexador. Isso importa quando ha
+    aportes -- aplicar a taxa so sobre o valor inicial subestima o benchmark e
+    faz a carteira parecer melhor do que foi.
 
-    Fonte: SGS do Banco Central (series 12 e 11), oficial e publica. Taxa passada
-    nao muda, entao ela e gravada uma vez e nunca mais buscada.
+    O IPCA e publicado uma vez por MES (nao por dia util, como CDI/Selic) e sai
+    com defasagem -- o valor de um mes so aparece perto do dia 10 do mes
+    seguinte. `BcbClient` espalha a taxa mensal em taxas diarias equivalentes
+    antes de guardar; a linha do IPCA no grafico fica, por isso, sempre um mes
+    "atras" da ponta da carteira -- comportamento esperado, nao bug.
+
+    Ibovespa nao vem do Banco Central -- o SGS descontinuou essa serie em 2019.
+    Vem do Yahoo Finance como a variacao percentual diaria do indice, o que
+    equivale a "quanto um ETF que segue o Ibovespa 1:1 teria rendido".
+
+    Fontes: SGS do Banco Central (series 12, 11 e 433) para CDI/Selic/IPCA, e
+    Yahoo Finance para o Ibovespa. Taxa de um dia passado nao muda, entao ela e
+    gravada uma vez e nunca mais buscada.
     """
     snapshots, curva, taxas, motivo = await benchmark_service.evolucao_comparada(
-        db, bcb, carteira.id, indexador, desde=desde, ate=ate, limite=limit
+        db, bcb, ibov, carteira.id, indexador, desde=desde, ate=ate, limite=limit
     )
     pontos = [SnapshotRead.model_validate(s) for s in snapshots]
+
     rentabilidade = [
         RentabilidadePoint(date=p.date, carteira=p.carteira, benchmark=p.benchmark)
         for p in benchmark_service.curva_rentabilidade(snapshots, taxas)
     ]
 
-    if not curva:
+    # `indexador is None` e redundante em runtime (sem indexador a curva vem
+    # vazia), mas nao para o mypy: sem ele, o tipo segue `Indexador | None` la
+    # embaixo, onde a serie de benchmark exige um indexador de verdade.
+    if indexador is None or not curva:
         return EvolutionResponse(
             pontos=pontos,
             rentabilidade=rentabilidade,

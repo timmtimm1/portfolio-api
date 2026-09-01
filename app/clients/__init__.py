@@ -10,6 +10,7 @@ from app.clients.base import ProvedorDeCotacoes
 from app.clients.bcb import BcbClient
 from app.clients.brapi import BrapiClient
 from app.clients.composto import ProvedorEncadeado
+from app.clients.ibov import IbovClient
 from app.clients.yahoo import YahooClient
 from app.core.config import get_settings
 
@@ -17,6 +18,7 @@ __all__ = [
     "fechar_http_client",
     "get_bcb_client",
     "get_http_client",
+    "get_ibov_client",
     "get_provedor_de_cotacoes",
 ]
 
@@ -64,6 +66,12 @@ def get_provedor_de_cotacoes() -> ProvedorDeCotacoes:
 def get_bcb_client() -> BcbClient:
     """Cliente do Banco Central, compartilhando o mesmo pool HTTP."""
     return BcbClient(get_http_client())
+
+
+@lru_cache
+def get_ibov_client() -> IbovClient:
+    """Cliente do Ibovespa (Yahoo Finance), compartilhando o mesmo pool HTTP."""
+    return IbovClient(get_http_client())
 
 
 async def fechar_http_client() -> None:

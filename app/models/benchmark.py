@@ -1,4 +1,5 @@
-"""Taxas diarias de referencia (CDI, Selic) publicadas pelo Banco Central."""
+"""Taxas diarias de referencia para comparar a carteira: CDI, Selic e IPCA, do
+Banco Central, e Ibovespa, do Yahoo Finance."""
 
 from __future__ import annotations
 
@@ -18,22 +19,42 @@ class Indexador(enum.StrEnum):
     CDI (serie 12) e Selic (serie 11) sao praticamente identicas no dia a dia --
     o CDI acompanha a Selic de perto. Guardamos as duas porque a comparacao
     usual de fundos e "% do CDI", enquanto o Tesouro Selic segue a Selic.
+
+    IPCA (serie 433) e outra familia: o BCB publica UM valor por MES, nao por
+    dia util. `BcbClient.taxas()` espalha essa taxa mensal em taxas diarias
+    equivalentes antes de gravar aqui -- por isso esta tabela guarda "um dia
+    util" para CDI/Selic e "um dia de calendario" para IPCA, e ambos convivem
+    na mesma coluna sem o resto do sistema precisar saber a diferenca.
+
+    IBOV nao vem do BCB: o SGS tinha uma serie (numero 7), mas foi
+    DESCONTINUADA em 2019 -- pedir dados de hoje devolve "Value(s) not found".
+    Vem do Yahoo Finance (ticker "^BVSP"), o mesmo fornecedor de reserva que
+    `YahooClient` ja usa para cotacao de acoes. Nao e uma taxa no sentido de
+    CDI/Selic -- e a variacao percentual diaria do INDICE (fechamento de hoje
+    sobre o de ontem). Matematicamente isso e exatamente o que uma carteira
+    investida 1:1 no Ibovespa (um ETF como BOVA11, sem taxas) teria ganho ou
+    perdido naquele dia -- entao trata-se como uma taxa diaria comum, e reusa
+    a mesma `curva_equivalente()` de CDI/Selic/IPCA sem nenhuma mudanca.
     """
 
     CDI = "cdi"
     SELIC = "selic"
+    IPCA = "ipca"
+    IBOV = "ibov"
 
 
 class BenchmarkRate(Base):
-    """Taxa de UM dia util.
+    """Taxa de um dia (util para CDI/Selic, de calendario para IPCA -- ver o
+    comentario em `Indexador`).
 
-    Chave natural (indexador, date): o BCB publica um valor por dia util, e a PK
+    Chave natural (indexador, date): o BCB publica um valor por dia util (ou,
+    no caso do IPCA, o adaptador deriva um por dia de calendario), e a PK
     composta impede duplicata na sincronizacao repetida -- mesma logica de
     `price_history`.
 
-    Nao ha fim de semana nem feriado na serie. Isso e uma propriedade util, nao
-    um buraco: o CDI so rende em dia util, entao a ausencia da data ja significa
-    "nao rendeu".
+    Para CDI/Selic, nao ha fim de semana nem feriado na serie. Isso e uma
+    propriedade util, nao um buraco: o CDI so rende em dia util, entao a
+    ausencia da data ja significa "nao rendeu".
     """
 
     __tablename__ = "benchmark_rates"

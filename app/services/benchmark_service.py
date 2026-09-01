@@ -1,4 +1,4 @@
-"""Comparacao da carteira contra CDI / Selic.
+"""Comparacao da carteira contra CDI, Selic, IPCA ou Ibovespa.
 
 ## A pergunta que este modulo responde
 
@@ -23,17 +23,28 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date as date_type
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.bcb import BcbClient
+from app.clients.ibov import IbovClient
 from app.models.benchmark import BenchmarkRate, Indexador
 from app.models.snapshot import PortfolioSnapshot
+
+# O formato que qualquer fornecedor de taxas precisa produzir: dado um
+# periodo, uma taxa diaria por data. `BcbClient.taxas` (com o indexador ja
+# fixado via `partial`) e `IbovClient.variacoes_diarias` tem assinaturas
+# diferentes uma da outra, mas ambas encaixam aqui -- e e essa forma comum que
+# deixa `taxas_do_periodo` sem precisar saber de qual fornecedor veio o
+# numero.
+BuscarTaxas = Callable[[date_type, date_type], Awaitable[dict[date_type, Decimal]]]
 
 logger = logging.getLogger(__name__)
 ZERO = Decimal(0)
@@ -57,20 +68,23 @@ class PontoRentabilidade:
 
 async def taxas_do_periodo(
     db: AsyncSession,
-    cliente: BcbClient,
     indexador: Indexador,
     desde: date_type,
     ate: date_type,
+    *,
+    buscar: BuscarTaxas,
 ) -> dict[date_type, Decimal]:
-    """Le do banco e busca no BCB so o que faltar.
+    """Le do banco e busca no fornecedor so o que faltar.
 
-    Mesma logica do cache de cotacoes, com uma diferenca importante: taxa passada
-    NAO muda. Uma vez gravado, o CDI de um dia esta gravado para sempre -- entao
-    nao ha TTL aqui, so preenchimento das lacunas.
+    `buscar` e quem sabe de onde vem o numero (BCB para CDI/Selic/IPCA, Yahoo
+    para Ibovespa) -- esta funcao so sabe cachear. Mesma logica do cache de
+    cotacoes, com uma diferenca importante: taxa de um dia PASSADO nao muda.
+    Uma vez gravado, o CDI (ou o Ibovespa) de um dia esta gravado para sempre
+    -- entao nao ha TTL aqui, so preenchimento das lacunas.
 
-    A verificacao de lacuna e por COBERTURA das pontas, nao por contagem: o BCB
-    nao publica em fim de semana e feriado, entao "faltam dias" e o estado normal
-    de qualquer intervalo.
+    A verificacao de lacuna e por COBERTURA das pontas, nao por contagem: nem
+    BCB nem B3 publicam em fim de semana e feriado, entao "faltam dias" e o
+    estado normal de qualquer intervalo.
     """
     existentes = {
         linha.date: linha.rate
@@ -90,10 +104,10 @@ async def taxas_do_periodo(
     if not precisa_buscar:
         return existentes
 
-    novas = await cliente.taxas(indexador, desde, ate)
+    novas = await buscar(desde, ate)
     if not novas:
-        # O BCB fora do ar nao pode derrubar o grafico da carteira: devolvemos o
-        # que ja tinhamos, mesmo incompleto.
+        # O fornecedor fora do ar nao pode derrubar o grafico da carteira:
+        # devolvemos o que ja tinhamos, mesmo incompleto.
         return existentes
 
     stmt = insert(BenchmarkRate).values(
@@ -143,20 +157,40 @@ def curva_equivalente(
     return curva
 
 
-NOMES = {Indexador.CDI: "CDI", Indexador.SELIC: "Selic"}
+NOMES = {
+    Indexador.CDI: "CDI",
+    Indexador.SELIC: "Selic",
+    Indexador.IPCA: "IPCA",
+    Indexador.IBOV: "Ibovespa",
+}
+
+# Usado so na mensagem de erro ("nao foi possivel obter a serie X em Y agora"):
+# CDI/Selic/IPCA vem do Banco Central, Ibovespa do Yahoo Finance -- dizer
+# "Banco Central" para os quatro seria simplesmente falso para o Ibovespa.
+FONTES = {
+    Indexador.CDI: "Banco Central",
+    Indexador.SELIC: "Banco Central",
+    Indexador.IPCA: "Banco Central",
+    Indexador.IBOV: "Yahoo Finance",
+}
 
 
 async def evolucao_comparada(
     db: AsyncSession,
-    cliente: BcbClient,
+    bcb: BcbClient,
+    ibov: IbovClient,
     portfolio_id: uuid.UUID,
-    indexador: Indexador,
+    indexador: Indexador | None,
     *,
     desde: date_type | None = None,
     ate: date_type | None = None,
     limite: int,
 ) -> tuple[list[PortfolioSnapshot], list[PontoBenchmark], dict[date_type, Decimal], str | None]:
-    """Snapshots em ordem cronologica + a curva equivalente do indexador."""
+    """Snapshots em ordem cronologica + a curva equivalente do indexador.
+
+    `indexador=None` significa "sem comparacao": devolve o historico e curva
+    vazia. Nao e um caso de erro, e uma escolha do usuario.
+    """
     stmt = select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == portfolio_id)
     if desde is not None:
         stmt = stmt.where(PortfolioSnapshot.date >= desde)
@@ -172,16 +206,31 @@ async def evolucao_comparada(
     )
     snapshots = sorted(recentes, key=lambda s: s.date)
 
+    if indexador is None:
+        # Sair ANTES da checagem de tamanho: quem nao pediu comparacao nao pode
+        # receber "a comparacao precisa de dois dias" como explicacao. E poupa
+        # uma ida ao BCB para buscar taxas que ninguem usaria.
+        return snapshots, [], {}, None
+
     if len(snapshots) < 2:
         return snapshots, [], {}, "A comparacao precisa de pelo menos dois dias de historico."
 
-    taxas = await taxas_do_periodo(db, cliente, indexador, snapshots[0].date, snapshots[-1].date)
+    # `ibov.variacoes_diarias` nao recebe `indexador` (so existe um indice);
+    # `partial` fixa esse parametro em `bcb.taxas` para que os dois encaixem na
+    # mesma forma (`BuscarTaxas`) e `taxas_do_periodo` nao precise de um `if`
+    # para saber qual fornecedor chamar.
+    buscar: BuscarTaxas = (
+        ibov.variacoes_diarias if indexador is Indexador.IBOV else partial(bcb.taxas, indexador)
+    )
+    taxas = await taxas_do_periodo(
+        db, indexador, snapshots[0].date, snapshots[-1].date, buscar=buscar
+    )
     if not taxas:
         return (
             snapshots,
             [],
             {},
-            f"Nao foi possivel obter a serie do {NOMES[indexador]} no Banco Central agora.",
+            f"Nao foi possivel obter a serie do {NOMES[indexador]} em {FONTES[indexador]} agora.",
         )
 
     return snapshots, curva_equivalente(snapshots, taxas), taxas, None
