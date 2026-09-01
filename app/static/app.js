@@ -631,6 +631,58 @@ const ROTULO_TIPO = {
   indefinido: "A classificar",
 };
 
+/* A pílula "A classificar" vira um seletor ao ser clicada.
+
+   O Yahoo não diz se o provento foi dividendo ou JCP, e a diferença vale 15%
+   de imposto retido. O aviso de que o número pode estar errado já existia; o
+   que faltava era a pessoa poder consertar sem sair da tela.
+
+   Só proventos indefinidos ganham o seletor: os já classificados viraram fato,
+   e reabrir a escolha convidaria a mexer no que está certo. */
+function seletorDeTipo(p) {
+  const select = el("select", "seletor-tipo");
+  select.setAttribute("aria-label", `Classificar o provento de ${p.ticker} de ${dataBR(p.data_com)}`);
+
+  const inicial = el("option", null, "A classificar");
+  inicial.value = "";
+  select.append(inicial);
+  for (const [valor, rotulo] of [
+    ["dividendo", "Dividendo"],
+    ["jcp", "JCP (−15%)"],
+    ["rendimento", "Rendimento"],
+  ]) {
+    const o = el("option", null, rotulo);
+    o.value = valor;
+    select.append(o);
+  }
+
+  select.addEventListener("change", async () => {
+    if (!select.value) return;
+    select.disabled = true;
+    try {
+      await api(comCarteira("/portfolio/dividends/reclassificar"), {
+        method: "POST",
+        body: JSON.stringify({
+          ticker: p.ticker,
+          data_com: p.data_com,
+          tipo: select.value,
+        }),
+      });
+      // Reclassificar muda o valor líquido, que entra no retorno total --
+      // então o gráfico muda junto, não só esta tabela.
+      await carregarProventos();
+      invalidar();
+    } catch (e) {
+      const aviso = $("#proventos-aviso");
+      aviso.textContent = e.message;
+      aviso.hidden = false;
+      select.disabled = false;
+      select.value = "";
+    }
+  });
+  return select;
+}
+
 async function carregarProventos() {
   const dados = await api(comCarteira("/portfolio/dividends"));
   const corpo = $("#tabela-proventos tbody");
@@ -644,8 +696,8 @@ async function carregarProventos() {
     selo.hidden = true;
     aviso.hidden = true;
     vazio.textContent =
-      "Nenhum provento registrado. Clique em “Buscar proventos” para consultar " +
-      "o histórico dos ativos desta carteira.";
+      "Nenhum provento registrado. Clique em “Atualizar eventos” para buscar " +
+      "proventos e desdobramentos dos ativos desta carteira.";
     vazio.hidden = false;
     return;
   }
@@ -682,9 +734,13 @@ async function carregarProventos() {
     tr.append(el("td", null, p.ticker));
 
     const tdTipo = el("td");
-    const pilula = el("span", "pilula-tipo", ROTULO_TIPO[p.tipo] || p.tipo);
-    pilula.dataset.tipo = p.tipo;
-    tdTipo.append(pilula);
+    if (p.tipo === "indefinido") {
+      tdTipo.append(seletorDeTipo(p));
+    } else {
+      const pilula = el("span", "pilula-tipo", ROTULO_TIPO[p.tipo] || p.tipo);
+      pilula.dataset.tipo = p.tipo;
+      tdTipo.append(pilula);
+    }
     tr.append(tdTipo);
 
     tr.append(el("td", "num", num(p.quantidade)));
@@ -705,9 +761,33 @@ $("#btn-sync-proventos").addEventListener("click", async (ev) => {
     // botão evita a fila de cliques que estouraria o rate limit de 10/hora.
     const r = await api(comCarteira("/portfolio/dividends/sync"), { method: "POST" });
     await carregarProventos();
-    // Recarrega a visão inteira: o provento entra no retorno total, então o
-    // gráfico muda junto.
-    if (r.gravados > 0) invalidar();
+    // Recarrega a visão inteira: provento entra no retorno total e
+    // desdobramento muda a quantidade, então o gráfico e as posições mudam
+    // junto.
+    if (r.gravados > 0 || r.desdobramentos > 0) invalidar();
+
+    // Dizer o que aconteceu, inclusive quando nada aconteceu.
+    //
+    // Um botão que recarrega em silêncio deixa a pessoa sem saber se funcionou
+    // ou se o clique se perdeu -- e "0 novos" é uma resposta legítima, não uma
+    // falha: significa que já estava tudo lá.
+    const partes = [];
+    if (r.gravados) partes.push(`${r.gravados} provento${r.gravados > 1 ? "s" : ""}`);
+    if (r.desdobramentos) {
+      partes.push(`${r.desdobramentos} desdobramento${r.desdobramentos > 1 ? "s" : ""}`);
+    }
+    const resumo = partes.length
+      ? `${partes.join(" e ")} encontrado${partes.length > 1 || r.gravados > 1 ? "s" : ""}.`
+      : `Nada novo em ${r.tickers_consultados.length} ativo(s) — já estava atualizado.`;
+
+    // `carregarProventos()` acabou de escrever aqui o alerta de provento sem
+    // classificação. Ele CONTINUA valendo -- somamos a mensagem em vez de
+    // sobrescrever, senão o aviso de 15% de imposto some no primeiro clique
+    // e não volta mais.
+    const aviso = $("#proventos-aviso");
+    const alerta = aviso.hidden ? "" : aviso.textContent;
+    aviso.textContent = alerta ? `${resumo} ${alerta}` : resumo;
+    aviso.hidden = false;
   } catch (e) {
     const aviso = $("#proventos-aviso");
     aviso.textContent = e.message;

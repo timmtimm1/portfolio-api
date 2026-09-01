@@ -560,3 +560,25 @@ h1, h2, h3, p { margin: 0; }
   fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round;
 }
+
+/* Seletor de tipo do provento, na própria linha da tabela.
+   Herda o cinza da pílula "indefinido" -- é o mesmo estado, agora acionável.
+   Colori-lo como as classificações sugeriria uma informação que ainda não
+   temos. */
+.seletor-tipo {
+  background: rgba(255, 255, 255, .07);
+  color: var(--txt-2);
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+  max-width: 150px;
+}
+.seletor-tipo:hover { border-color: var(--borda-forte); color: var(--txt); }
+.seletor-tipo:focus-visible {
+  border-color: var(--violeta);
+  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
+}
+.seletor-tipo:disabled { opacity: .5; cursor: default; }

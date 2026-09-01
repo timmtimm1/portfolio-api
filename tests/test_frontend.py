@@ -357,3 +357,51 @@ class TestBotaoDeApagarCarteira:
         trecho = js[js.index('$("#btn-apagar-carteira").addEventListener') :][:2000]
         assert "operação" in trecho and "histórico" in trecho
         assert "desfazer" in trecho
+
+
+class TestClassificarProvento:
+    """O Yahoo não distingue dividendo de JCP, e a diferença vale 15% de
+    imposto retido. O aviso de que o número pode estar errado já existia; a
+    correção só existia na API."""
+
+    def test_a_pilula_indefinida_vira_seletor(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "seletorDeTipo" in js
+        assert 'if (p.tipo === "indefinido")' in js
+
+    def test_so_o_indefinido_e_editavel(self) -> None:
+        """Provento já classificado virou fato. Reabrir a escolha convidaria a
+        mexer no que está certo."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("const tdTipo = el(") :][:400]
+        assert "else {" in trecho and "pilula-tipo" in trecho
+
+    def test_reclassificar_recarrega_o_grafico(self) -> None:
+        """Mudar o tipo muda o valor líquido, que entra no retorno total."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("function seletorDeTipo") :][:1600]
+        assert "invalidar()" in trecho
+
+
+class TestRotuloDaSincronizacao:
+    """Regressão de uma ponta solta: o botão dizia "Buscar proventos" depois de
+    passar a sincronizar desdobramentos também. Rótulo que mente sobre o que o
+    botão faz é pior que rótulo genérico."""
+
+    def test_o_rotulo_cobre_os_dois_eventos(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert "Buscar proventos" not in html
+        assert "Atualizar eventos" in html
+
+    def test_desdobramento_novo_tambem_recarrega_a_visao(self) -> None:
+        """Desdobramento muda a QUANTIDADE das posições. Recarregar só quando
+        vem provento deixaria a tela desatualizada no caso mais grave."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "r.gravados > 0 || r.desdobramentos > 0" in js
+
+    def test_o_aviso_de_jcp_nao_e_sobrescrito(self) -> None:
+        """O aviso de imposto retido é permanente enquanto houver provento sem
+        classificação. A mensagem da sincronização soma, não substitui -- senão
+        o alerta some no primeiro clique e não volta."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert 'aviso.hidden ? "" : aviso.textContent' in js
