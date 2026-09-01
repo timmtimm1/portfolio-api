@@ -405,3 +405,78 @@ class TestRotuloDaSincronizacao:
         o alerta some no primeiro clique e não volta."""
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         assert 'aviso.hidden ? "" : aviso.textContent' in js
+
+
+class TestTelaDeRebalanceamento:
+    """A tela que traduz peso em ordem.
+
+    Os testes guardam as decisões que impedem os dois piores desfechos: pedir
+    um plano sem ter fronteira calculada (pesos de onde?) e o usuário achar
+    que o app executou a ordem por ele.
+    """
+
+    def test_o_cartao_existe(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="btn-rebalancear"' in html
+        assert 'id="tabela-ordens"' in html
+        assert 'id="tabela-desvios"' in html
+
+    def test_os_dois_modos_estao_na_tela(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'value="aporte"' in html and 'value="completo"' in html
+
+    def test_deixa_claro_que_nao_executa(self) -> None:
+        """Uma lista de ordens numa tela de investimento parece uma ordem
+        enviada. Se a pessoa achar que o app comprou por ela, o dano não é de
+        interface -- é de dinheiro."""
+        html = (ESTATICOS / "index.html").read_text()
+        assert "não é uma ordem enviada" in html or "sugestão, não uma ordem" in html
+        assert "Nada é gravado no seu livro" in html
+
+    def test_usa_os_pesos_da_fronteira_ja_calculada(self) -> None:
+        """Mandar os pesos que a tela mostrou garante que o plano corresponde à
+        carteira que a pessoa viu no gráfico. Recalcular no servidor poderia
+        devolver outra."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "ultimaOtimizacao" in js
+        assert "pesos: alvo.pesos" in js
+
+    def test_recalcular_a_fronteira_invalida_o_plano(self) -> None:
+        """Pesos novos, plano velho: deixar o anterior na tela mostraria ordens
+        que não levam mais à carteira selecionada."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("ultimaOtimizacao = r;") :][:400]
+        assert '$("#reb-resultado").hidden = true' in trecho
+
+    def test_recusa_calcular_sem_fronteira(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index('$("#btn-rebalancear").addEventListener') :][:600]
+        assert "if (!ultimaOtimizacao)" in trecho
+
+    def test_aceita_virgula_no_aporte(self) -> None:
+        """A API fala ponto decimal; a pessoa digita vírgula. Mandar "1.000,00"
+        cru daria 422 num valor que ela escreveu certo."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "paraNumeroDaApi" in js
+
+    def test_avisa_sobre_ativo_sem_cotacao(self) -> None:
+        """Omitir em silêncio faria a pessoa achar que o plano cobre a carteira
+        inteira."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "plano.sem_preco.length" in js
+
+    def test_o_desvio_nao_usa_cor_de_lucro_e_prejuizo(self) -> None:
+        """`sinal()` pinta lucro de verde e prejuízo de vermelho. A primeira
+        versão desta tabela reusou isso, e ITUB4 -- 34,8 pontos ACIMA do alvo --
+        aparecia em verde, como se estivesse indo bem. Estar acima é tão fora do
+        lugar quanto estar abaixo."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("const desvios = $(") :]
+        fim = trecho.index('const aviso = $("#reb-aviso")')
+        assert "sinal(" not in trecho[:fim], "desvio nao pode usar a cor de lucro/prejuizo"
+
+    def test_peso_e_proporcao_e_nao_variacao(self) -> None:
+        """`pct()` prefixa "+" para valores não negativos. Num peso, "+35,0%"
+        sugere um ganho de 35%."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "proporcao(d.peso_atual)" in js and "proporcao(d.peso_alvo)" in js

@@ -20,6 +20,10 @@ let token = null;         // só em memória, de propósito
 let usuarioEmail = "";
 const graficos = {};
 let ultimaEvolucao = null;
+// A otimizacao mais recente. O rebalanceamento manda os pesos DELA de volta
+// ao servidor, em vez de o servidor recalcular: assim o plano corresponde
+// exatamente a carteira que a pessoa esta vendo no grafico.
+let ultimaOtimizacao = null;
 // Percentual por padrao: em reais, uma carteira que cresceu esmaga a escala e
 // o CDI vira uma linha reta, sem informacao nenhuma.
 let escala = "pct";
@@ -93,6 +97,9 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 const pct = (v, casas = 2) =>
   `${v >= 0 ? "+" : ""}${(v * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
 const num = (v) => Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 8 });
+/** Proporção (0.35 -> "35,0%"). Sem sinal: peso não é variação. */
+const proporcao = (v, casas = 1) =>
+  `${(Number(v) * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
 const dataBR = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR");
 
 /* ═══ Datas ═══
@@ -883,9 +890,12 @@ async function otimizar() {
       method: "POST",
       body: JSON.stringify({ peso_maximo: Number($("#peso-maximo").value), pontos: 40 }),
     });
+    ultimaOtimizacao = r;
     desenharFronteira(r);
     renderCarteiras(r);
     $("#aviso-modelo").textContent = r.aviso;
+    // Recalcular a fronteira invalida o plano anterior: os pesos mudaram.
+    $("#reb-resultado").hidden = true;
   } finally {
     botao.disabled = false;
     botao.textContent = "Recalcular";
@@ -1011,6 +1021,160 @@ function renderCarteiras(r) {
     cartao.append(barras);
     cartao.append(el("p", "sub", explicacao));
     alvo.append(cartao);
+  }
+}
+
+/* ═══ Rebalanceamento ═══ */
+
+/** "1.234,56" -> "1234.56". A API fala ponto decimal; a pessoa digita vírgula. */
+function paraNumeroDaApi(texto) {
+  const limpo = texto.trim().replace(/\./g, "").replace(",", ".");
+  return /^\d+(\.\d{1,2})?$/.test(limpo) ? limpo : null;
+}
+
+// O campo de aporte só faz sentido nos modos que usam dinheiro novo. No modo
+// completo sem aporte ele fica visível mas opcional -- vender e comprar já
+// financia o rebalanceamento sozinho.
+$("#reb-modo").addEventListener("change", () => {
+  const completo = $("#reb-modo").value === "completo";
+  $("#campo-aporte").querySelector("span").textContent = completo
+    ? "Aporte (opcional)"
+    : "Aporte";
+});
+
+$("#btn-rebalancear").addEventListener("click", async () => {
+  const aviso = $("#reb-aviso");
+  aviso.hidden = true;
+
+  if (!ultimaOtimizacao) {
+    aviso.textContent = "Calcule a fronteira primeiro — o plano usa os pesos dela.";
+    aviso.hidden = false;
+    return;
+  }
+
+  const alvo = ultimaOtimizacao[$("#reb-alvo").value];
+  if (!alvo) {
+    aviso.textContent =
+      "Esta carteira-alvo não foi calculada. Recalcule a fronteira ou escolha a outra.";
+    aviso.hidden = false;
+    return;
+  }
+
+  const completo = $("#reb-modo").value === "completo";
+  const bruto = $("#reb-aporte").value.trim();
+  const aporte = bruto === "" ? "0" : paraNumeroDaApi(bruto);
+  if (aporte === null) {
+    aviso.textContent = "Valor do aporte inválido. Use algo como 1.000,00.";
+    aviso.hidden = false;
+    $("#reb-aporte").focus();
+    return;
+  }
+  if (!completo && Number(aporte) <= 0) {
+    aviso.textContent =
+      "Sem aporte e sem vender não há o que rebalancear. Informe um valor ou troque o modo.";
+    aviso.hidden = false;
+    $("#reb-aporte").focus();
+    return;
+  }
+
+  const botao = $("#btn-rebalancear");
+  botao.disabled = true;
+  botao.textContent = "Calculando…";
+  try {
+    const plano = await api(comCarteira("/portfolio/rebalance"), {
+      method: "POST",
+      body: JSON.stringify({
+        pesos: alvo.pesos,
+        aporte,
+        permitir_venda: completo,
+      }),
+    });
+    renderPlano(plano);
+  } catch (e) {
+    aviso.textContent = e.message;
+    aviso.hidden = false;
+    $("#reb-resultado").hidden = true;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Calcular plano";
+  }
+});
+
+function renderPlano(plano) {
+  $("#reb-resultado").hidden = false;
+
+  const resumo = $("#reb-resumo");
+  limpar(resumo);
+  for (const [classe, valor, rotulo] of [
+    ["venda", plano.total_vendas, "a vender"],
+    ["compra", plano.total_compras, "a comprar"],
+    ["", plano.sobra, "sobra em caixa"],
+  ]) {
+    const bloco = el("div", classe);
+    bloco.append(el("b", null, brl.format(valor)), el("span", null, rotulo));
+    resumo.append(bloco);
+  }
+
+  const corpo = $("#tabela-ordens tbody");
+  limpar(corpo);
+  if (!plano.ordens.length) {
+    const tr = el("tr");
+    const td = el("td", "vazio", "Nenhuma ordem: a carteira já está no alvo, ou o valor não compra uma ação inteira.");
+    td.colSpan = 5;
+    tr.append(td);
+    corpo.append(tr);
+  }
+  for (const o of plano.ordens) {
+    const tr = el("tr");
+    const td = el("td");
+    const pilula = el("span", "pilula-ordem", o.side === "compra" ? "Comprar" : "Vender");
+    pilula.dataset.side = o.side;
+    td.append(pilula);
+    tr.append(td);
+    tr.append(el("td", null, o.ticker));
+    tr.append(el("td", "num", num(o.quantidade)));
+    tr.append(el("td", "num", brl.format(o.preco)));
+    tr.append(el("td", "num", brl.format(o.valor)));
+    corpo.append(tr);
+  }
+
+  const desvios = $("#tabela-desvios tbody");
+  limpar(desvios);
+  // Do mais distante para o mais próximo: quem está mais fora do lugar é o
+  // que interessa, e ordenar por ticker esconderia isso no meio da lista.
+  const ordenados = [...plano.desvios].sort(
+    (a, b) => Math.abs(Number(b.diferenca)) - Math.abs(Number(a.diferenca))
+  );
+  for (const d of ordenados) {
+    const tr = el("tr");
+    tr.append(el("td", null, d.ticker));
+    // Peso é proporção, não variação: "+35,0%" sugeriria um ganho de 35%.
+    tr.append(el("td", "num", proporcao(d.peso_atual)));
+    tr.append(el("td", "num", proporcao(d.peso_alvo)));
+    // Desvio NÃO usa verde e vermelho.
+    //
+    // `sinal()` pinta lucro de verde e prejuízo de vermelho, e a primeira
+    // versão desta tabela reusou isso -- fazendo ITUB4, 34,8 pontos ACIMA do
+    // alvo, aparecer em verde como se estivesse indo bem. Estar acima é tão
+    // fora do lugar quanto estar abaixo; o que importa é a distância, e o
+    // sinal já diz a direção.
+    const td = el("td", "num desvio", `${pct(Number(d.diferenca), 1)} p.p.`);
+    if (Math.abs(Number(d.diferenca)) >= 0.1) td.classList.add("desvio--grande");
+    tr.append(td);
+    tr.append(el("td", "num", brl.format(d.valor_atual)));
+    desvios.append(tr);
+  }
+
+  const aviso = $("#reb-aviso");
+  if (plano.sem_preco.length) {
+    // Omitir em silêncio seria pior: a pessoa acharia que o plano cobre a
+    // carteira inteira, e ela não cobre.
+    aviso.textContent =
+      `Fora do plano por falta de cotação: ${plano.sem_preco.join(", ")}. ` +
+      "Sem preço não dá para saber quantas ações comprar.";
+    aviso.hidden = false;
+  } else {
+    aviso.hidden = true;
   }
 }
 

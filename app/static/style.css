@@ -582,3 +582,51 @@ h1, h2, h3, p { margin: 0; }
   box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
 }
 .seletor-tipo:disabled { opacity: .5; cursor: default; }
+
+/* ══ Rebalanceamento ══ */
+.cartao-rebalance { margin-top: 18px; }
+
+.reb-controles {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px;
+  padding: 4px 0 18px;
+}
+.reb-controles .campo { flex: 0 1 210px; }
+.reb-controles .btn { flex: 0 0 auto; }
+
+/* O resumo em três blocos: o que sai, o que entra, o que sobra. Números
+   grandes de propósito -- é a resposta da pergunta, não um detalhe. */
+.reb-resumo {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; background: var(--borda);
+  border: 1px solid var(--borda); border-radius: var(--r-s);
+  overflow: hidden; margin-bottom: 18px;
+}
+.reb-resumo div { background: var(--superficie-2); padding: 14px 16px; }
+.reb-resumo b { display: block; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.reb-resumo span {
+  display: block; font-size: 11px; color: var(--txt-3);
+  text-transform: uppercase; letter-spacing: .07em; margin-top: 4px;
+}
+.reb-resumo .compra b { color: var(--ciano); }
+.reb-resumo .venda b  { color: var(--ouro); }
+
+.reb-legenda { margin: 22px 0 8px; }
+.reb-rodape {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--borda);
+  font-size: 12.5px; color: var(--txt-3); line-height: 1.65;
+}
+
+/* Compra e venda com cores distintas: numa lista de ordens, confundir as duas
+   custa dinheiro. A cor faz a distinção antes de a pessoa ler a palavra. */
+.pilula-ordem {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
+  padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
+}
+.pilula-ordem[data-side="compra"] { background: rgba(53, 214, 232, .15); color: var(--ciano); }
+.pilula-ordem[data-side="venda"]  { background: rgba(245, 181, 74, .15); color: var(--ouro); }
+
+/* Desvio em relação ao alvo: neutro por padrão, destacado quando é grande.
+   Deliberadamente SEM verde e vermelho -- essas cores significam lucro e
+   prejuízo no resto do app, e estar acima do alvo não é lucro. */
+.desvio { color: var(--txt-2); }
+.desvio--grande { color: var(--txt); font-weight: 600; }

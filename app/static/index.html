@@ -276,6 +276,75 @@
 
       <div class="grade-carteiras" id="carteiras-sugeridas"></div>
       <p class="aviso" id="aviso-modelo"></p>
+
+      <article class="cartao cartao-rebalance">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Rebalancear</h2>
+            <p class="sub">O que comprar e vender para chegar na carteira escolhida</p>
+          </div>
+        </div>
+
+        <div class="reb-controles">
+          <label class="campo">
+            <span>Carteira-alvo</span>
+            <select id="reb-alvo">
+              <option value="maximo_sharpe" selected>Máximo Sharpe</option>
+              <option value="minima_variancia">Mínima variância</option>
+            </select>
+          </label>
+
+          <label class="campo">
+            <span>Modo</span>
+            <select id="reb-modo">
+              <option value="aporte" selected>Só comprar, com aporte</option>
+              <option value="completo">Comprar e vender</option>
+            </select>
+          </label>
+
+          <label class="campo" id="campo-aporte">
+            <span>Aporte</span>
+            <input id="reb-aporte" type="text" inputmode="decimal" placeholder="1.000,00"
+                   maxlength="14" autocomplete="off">
+          </label>
+
+          <button class="btn btn--primario btn--pequeno" id="btn-rebalancear">
+            Calcular plano
+          </button>
+        </div>
+
+        <p class="aviso-comparacao" id="reb-aviso" hidden></p>
+
+        <div id="reb-resultado" hidden>
+          <div class="reb-resumo" id="reb-resumo"></div>
+
+          <div class="tabela-envolve">
+            <table class="tabela" id="tabela-ordens">
+              <thead><tr>
+                <th>Ordem</th><th>Ativo</th>
+                <th class="num">Qtd.</th><th class="num">Preço</th><th class="num">Valor</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <p class="sub reb-legenda">Distância do alvo, antes das ordens</p>
+          <div class="tabela-envolve">
+            <table class="tabela" id="tabela-desvios">
+              <thead><tr>
+                <th>Ativo</th><th class="num">Hoje</th><th class="num">Alvo</th>
+                <th class="num">Diferença</th><th class="num">Valor atual</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <p class="reb-rodape">
+            Isto é uma sugestão, não uma ordem enviada. Nada é gravado no seu livro —
+            você decide o que executar e lança as operações que fizer.
+          </p>
+        </div>
+      </article>
     </section>
 
     <!-- ── TRANSAÇÕES ── -->
