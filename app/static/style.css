@@ -111,6 +111,38 @@ h1, h2, h3, p { margin: 0; }
 }
 .campo-senha button:hover { background: rgba(123, 92, 255, .14); }
 
+/* Data: o <input type="date"> nativo desenha a data no idioma do NAVEGADOR,
+   nao no da pagina -- com o Chrome em ingles sai mm/dd/aaaa mesmo sob
+   lang="pt-BR", e nao existe atributo nem CSS que mude isso. O campo visivel
+   passou a ser texto com mascara dd/mm/aaaa; o input nativo continua aqui,
+   invisivel, so para abrir o calendario do sistema pelo botao. Ele fica com
+   opacity:0 em vez de display:none porque showPicker() exige um elemento
+   renderizado. */
+.campo-data { position: relative; display: block; }
+.campo-data > input[type="text"] { padding-right: 42px; }
+.campo-data > input[type="date"] {
+  position: absolute; inset: 0;
+  opacity: 0; pointer-events: none;
+  width: 100%; border: 0; padding: 0;
+}
+.campo-data > button {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 8px;
+  color: var(--txt-2);
+  transition: background .16s, color .16s;
+}
+.campo-data > button:hover { background: rgba(123, 92, 255, .14); color: var(--violeta-2); }
+.campo-data > button:focus-visible {
+  outline: none; background: rgba(123, 92, 255, .14);
+  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
+}
+.campo-data svg {
+  width: 17px; height: 17px;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
 .btn {
   border-radius: var(--r-s);
   padding: 11px 18px;

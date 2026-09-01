@@ -94,6 +94,80 @@ const pct = (v, casas = 2) =>
   `${v >= 0 ? "+" : ""}${(v * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
 const num = (v) => Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 8 });
 const dataBR = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR");
+
+/* ═══ Datas ═══
+   A API fala ISO (aaaa-mm-dd) porque e o unico formato sem ambiguidade:
+   03/04 e 3 de abril aqui e 4 de marco nos EUA. O usuario nunca ve ISO --
+   a conversao acontece na fronteira, nestas quatro funcoes, e em lugar nenhum
+   mais. Quando entrar o proximo campo de data (proventos, por exemplo), ele
+   reusa isto em vez de reinventar a regra. */
+
+/** A data de hoje no fuso de quem esta olhando a tela. */
+const hojeISO = () => {
+  const d = new Date();
+  // Nao usar toISOString(): ela converte para UTC, e as 21h de Brasilia la ja
+  // e o dia seguinte. O campo abriria preenchido com amanha -- e como o
+  // backend tambem compara em UTC, ele aceitaria a operacao no futuro.
+  const dd = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`;
+};
+
+/** `hojeISO()` menos `dias` dias corridos -- usada pelo seletor de período do
+ * gráfico de evolução (30/90/180/365 dias). `Date` já resolve a virada de
+ * mês/ano sozinho (30/set − 5 dias = 25/set, 3/jan − 5 dias = 29/dez). */
+const isoMenosDias = (dias) => {
+  const d = new Date();
+  d.setDate(d.getDate() - dias);
+  const dd = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`;
+};
+
+const isoParaBR = (iso) => {
+  const [a, m, d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+};
+
+/** dd/mm/aaaa -> aaaa-mm-dd. Devolve "" se a data nao existe no calendario. */
+const brParaISO = (br) => {
+  const p = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(br.trim());
+  if (!p) return "";
+  const dia = Number(p[1]), mes = Number(p[2]), ano = Number(p[3]);
+  // 31/02/2026 passa no regex, e o Date "conserta" para 03/03/2026 em silencio.
+  // Remontar e conferir os componentes e a unica checagem que pega isso.
+  const d = new Date(ano, mes - 1, dia);
+  if (d.getFullYear() !== ano || d.getMonth() !== mes - 1 || d.getDate() !== dia) return "";
+  return `${p[3]}-${p[2]}-${p[1]}`;
+};
+
+/** Insere as barras enquanto o usuario digita, sem exigir que ele as digite. */
+function aplicarMascaraData(input) {
+  input.addEventListener("input", () => {
+    // Colar aaaa-mm-dd e comum (vem de planilha, do extrato, da propria API).
+    // Sem este caso, os digitos seriam remontados na ordem errada e virariam
+    // uma data invalida silenciosa: 2026-08-20 sairia como 20/26/0820.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.value.trim());
+    if (iso) {
+      input.value = isoParaBR(input.value.trim());
+      input.setSelectionRange(input.value.length, input.value.length);
+      return;
+    }
+
+    const cursor = input.selectionStart ?? input.value.length;
+    const digitosAntesDoCursor = input.value.slice(0, cursor).replace(/\D/g, "").length;
+
+    const d = input.value.replace(/\D/g, "").slice(0, 8);
+    input.value = [d.slice(0, 2), d.slice(2, 4), d.slice(4, 8)].filter(Boolean).join("/");
+
+    // Reposicionar o cursor contando digitos, nao caracteres: reatribuir .value
+    // joga o cursor para o fim, o que torna impossivel corrigir o meio da data.
+    let pos = 0, vistos = 0;
+    while (pos < input.value.length && vistos < digitosAntesDoCursor) {
+      if (/\d/.test(input.value[pos])) vistos++;
+      pos++;
+    }
+    input.setSelectionRange(pos, pos);
+  });
+}
 const sinal = (v) => (Number(v) >= 0 ? "pos" : "neg");
 
 function el(tag, classe, texto) {
@@ -764,16 +838,53 @@ $("#btn-nova").addEventListener("click", () => {
   const form = $("#form-op");
   form.hidden = !form.hidden;
   if (!form.hidden) {
-    $("#op-data").value = new Date().toISOString().slice(0, 10);
+    $("#op-data").value = isoParaBR(hojeISO());
     $("#op-ticker").focus();
   }
 });
 $("#op-cancelar").addEventListener("click", () => { $("#form-op").hidden = true; });
 
+/* O campo de data: texto mascarado na frente, calendario nativo atras.
+   O nativo existe so como seletor -- quem guarda o valor e o campo de texto. */
+aplicarMascaraData($("#op-data"));
+$("#op-data-nativo").max = hojeISO();
+$("#op-data-calendario").addEventListener("click", () => {
+  const nativo = $("#op-data-nativo");
+  nativo.value = brParaISO($("#op-data").value) || hojeISO();
+  try {
+    nativo.showPicker();
+  } catch {
+    // showPicker() e recente e exige gesto do usuario. Se falhar, o campo de
+    // texto continua funcionando -- o calendario e conveniencia, nao caminho
+    // unico. Falhar aqui nao pode travar o registro da operacao.
+  }
+});
+$("#op-data-nativo").addEventListener("change", (ev) => {
+  if (ev.target.value) $("#op-data").value = isoParaBR(ev.target.value);
+});
+
 $("#form-op").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const erro = $("#op-erro");
   erro.hidden = true;
+
+  const traded_at = brParaISO($("#op-data").value);
+  if (!traded_at) {
+    erro.textContent = "Data invalida. Use o formato dd/mm/aaaa.";
+    erro.hidden = false;
+    $("#op-data").focus();
+    return;
+  }
+  if (traded_at > hojeISO()) {
+    // Comparacao de texto funciona aqui: em ISO, ordem alfabetica e ordem
+    // cronologica. E o mesmo limite que o backend aplica -- checar aqui so
+    // troca um 422 seco por uma frase que explica.
+    erro.textContent = "A data da operacao nao pode estar no futuro.";
+    erro.hidden = false;
+    $("#op-data").focus();
+    return;
+  }
+
   try {
     await api(comCarteira("/transactions"), {
       method: "POST",
@@ -783,7 +894,7 @@ $("#form-op").addEventListener("submit", async (ev) => {
         quantity: $("#op-qtd").value,
         price: $("#op-preco").value,
         fees: $("#op-taxas").value || "0",
-        traded_at: $("#op-data").value,
+        traded_at,
       }),
     });
     $("#form-op").reset();
@@ -819,7 +930,7 @@ $("#busca").addEventListener("input", (ev) => {
           document.querySelector('.nav-item[data-vista="transacoes"]').click();
           $("#form-op").hidden = false;
           $("#op-ticker").value = a.ticker;
-          $("#op-data").value = new Date().toISOString().slice(0, 10);
+          $("#op-data").value = isoParaBR(hojeISO());
           $("#op-qtd").focus();
           caixa.hidden = true;
           ev.target.value = "";

@@ -157,3 +157,61 @@ class TestAtributoHidden:
         pos_primeiro_display = css.find("display:")
         assert pos_regra != -1
         assert pos_regra < pos_primeiro_display or "!important" in css[pos_regra : pos_regra + 80]
+
+
+class TestFormatoDeData:
+    """Datas na tela em dd/mm/aaaa, e nao no formato do navegador.
+
+    O `<input type="date">` nativo desenha a data no idioma da INTERFACE do
+    navegador, nao no da pagina: com o Chrome em ingles ele mostra mm/dd/aaaa
+    mesmo sob `lang="pt-BR"`, e nao existe atributo nem CSS que mude isso. Por
+    isso o campo visivel virou texto com mascara, com o calendario nativo
+    escondido atras do botao -- e este teste existe para que ninguem "simplifique"
+    de volta para o input nativo sem perceber o que perde.
+
+    Estes testes olham o codigo-fonte, entao provam que a conversao ESTA no
+    lugar certo; nao provam que ela esta correta. A correcao de `brParaISO`
+    (31/02 recusado, 29/02 so em ano bissexto) e verificada rodando a funcao.
+    """
+
+    def test_o_campo_de_data_visivel_nao_e_o_input_nativo(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="op-data" type="text"' in html, (
+            "o campo visivel voltou a ser type=date: ele renderiza no idioma do "
+            "navegador, entao um usuario com Chrome em ingles ve mm/dd/aaaa"
+        )
+        assert 'placeholder="dd/mm/aaaa"' in html
+
+    def test_o_calendario_nativo_continua_disponivel(self) -> None:
+        """Trocar o input por texto nao pode custar o seletor de datas: sem ele,
+        registrar uma operacao antiga vira digitacao as cegas."""
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="op-data-nativo" type="date"' in html
+        assert 'id="op-data-calendario"' in html
+
+    def test_o_nativo_fica_invisivel_mas_renderizado(self) -> None:
+        """`display: none` faria `showPicker()` lancar InvalidStateError: o
+        elemento precisa estar renderizado. Por isso opacity, nao display."""
+        css = (ESTATICOS / "style.css").read_text()
+        regra = re.search(r'\.campo-data > input\[type="date"\]\s*\{([^}]*)\}', css)
+        assert regra is not None
+        assert "opacity: 0" in regra.group(1)
+        assert "display: none" not in regra.group(1)
+
+    def test_a_data_de_hoje_nao_vem_de_toisostring(self) -> None:
+        """`new Date().toISOString()` converte para UTC. As 21h de Brasilia la
+        ja e o dia seguinte, entao o campo abriria preenchido com AMANHA -- e o
+        backend, que tambem compara em UTC, aceitaria a operacao no futuro.
+        Um erro que nao lanca nada e produz um numero plausivel."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "toISOString" not in js, (
+            "toISOString() devolve a data em UTC; use hojeISO(), que usa o fuso "
+            "de quem esta olhando a tela"
+        )
+
+    def test_o_envio_converte_para_iso(self) -> None:
+        """A API so aceita aaaa-mm-dd. Se o valor do campo fosse enviado cru, o
+        backend receberia 20/08/2026 e devolveria 422."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert 'brParaISO($("#op-data").value)' in js
+        assert 'traded_at: $("#op-data").value' not in js
