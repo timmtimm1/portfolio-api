@@ -63,12 +63,38 @@ async def sincronizar(
         ).all()
     }
 
+    # Datas-com que ja existem, SEJA QUAL FOR o tipo.
+    #
+    # `ON CONFLICT DO NOTHING` sozinho nao basta aqui, e isso custou um bug: a
+    # chave primaria inclui `tipo`, entao reclassificar um provento de
+    # INDEFINIDO para JCP deixa a vaga do INDEFINIDO livre -- e a proxima
+    # sincronizacao reinsere a mesma data, agora contada DUAS vezes. O total da
+    # carteira sobe sozinho, sem erro nenhum.
+    #
+    # O Yahoo agrega por data-com: ele nunca devolve dois eventos no mesmo dia
+    # para o mesmo papel. Entao "esta data ja existe" e resposta suficiente
+    # para nao reimportar. Um segundo provento na mesma data (dividendo E JCP
+    # anunciados juntos) continua possivel pelo lancamento manual, que nao passa
+    # por aqui.
+    ja_existem = {
+        (asset_id, data_com)
+        for asset_id, data_com in (
+            await db.execute(
+                select(Dividend.asset_id, Dividend.data_com).where(
+                    Dividend.asset_id.in_(ids.values())
+                )
+            )
+        ).all()
+    }
+
     linhas: list[dict[str, object]] = []
     for ticker in tickers:
         asset_id = ids.get(ticker)
         if asset_id is None:
             continue
         for bruto in await cliente.proventos(ticker, desde, ate):
+            if (asset_id, bruto.data_com) in ja_existem:
+                continue
             linhas.append(
                 {
                     "asset_id": asset_id,

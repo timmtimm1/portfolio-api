@@ -14,6 +14,7 @@ from decimal import Decimal
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.yahoo import YahooClient
@@ -546,6 +547,49 @@ class TestSincronizacao:
 
         assert primeira == 1
         assert segunda == 0
+
+    async def test_nao_duplica_apos_reclassificacao(self, db: AsyncSession) -> None:
+        """Regressão de um bug real, achado com dados de verdade.
+
+        A chave primária inclui `tipo`. Reclassificar de INDEFINIDO para JCP
+        deixa a vaga do INDEFINIDO livre, e `ON CONFLICT DO NOTHING` -- que
+        olha a chave inteira -- não impede a reinserção. A segunda
+        sincronização criava uma SEGUNDA linha para a mesma data-com, e o
+        provento passava a ser contado duas vezes.
+
+        Na carteira real deste projeto isso inflou o total de R$ 75,44 para
+        R$ 111,63 sem nenhum erro aparecer.
+        """
+        ativo = await criar_ativo(db, ticker="ITUB4")
+
+        def responder(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=TestBuscaNoYahoo._payload([(2026, 6, 19, 0.36188)]))
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as http:
+            cliente = YahooClient(http)
+            await dividend_service.sincronizar(
+                db, cliente, ["ITUB4"], date(2026, 1, 1), date(2026, 12, 31)
+            )
+            await dividend_service.reclassificar(db, ativo.id, date(2026, 6, 19), TipoProvento.JCP)
+            reinseridos = await dividend_service.sincronizar(
+                db, cliente, ["ITUB4"], date(2026, 1, 1), date(2026, 12, 31)
+            )
+
+        assert reinseridos == 0
+
+        linhas = (
+            (
+                await db.execute(
+                    select(Dividend).where(
+                        Dividend.asset_id == ativo.id, Dividend.data_com == date(2026, 6, 19)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(linhas) == 1, f"{len(linhas)} linhas para a mesma data-com"
+        assert linhas[0].tipo is TipoProvento.JCP
 
     async def test_nao_desfaz_reclassificacao_manual(self, db: AsyncSession) -> None:
         """O caso que justifica `DO NOTHING` em vez de `DO UPDATE`: depois de o
