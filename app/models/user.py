@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, String
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -31,6 +33,32 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # transacoes, que e justamente o que o usuario nao quer perder. Alem disso
     # permite bloquear acesso na hora sem perder o rastro de auditoria.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # --- Conta de demonstracao -----------------------------------------------
+    #
+    # A demo NAO e um caminho anonimo paralelo: e um usuario comum, com senha
+    # inutilizavel, criado sob demanda. Essa escolha e o ponto central da
+    # feature -- todo o isolamento do app vive em `get_current_user` e
+    # `get_carteira`, e um caminho sem autenticacao seria uma SEGUNDA porta para
+    # a camada de dados, sem nenhuma dessas garantias.
+    #
+    # Sendo um usuario como outro qualquer, nao ha codigo novo de escopo para
+    # revisar, e os testes que ja protegem o isolamento passam a proteger a demo
+    # de graca.
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Quando a conta deixa de valer. Nulo em conta de verdade -- ela nao expira.
+    #
+    # Sem isto o banco cresceria sem limite: cada visitante que clicar em "ver
+    # demonstracao" deixa uma conta, uma carteira, transacoes e snapshots.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    @property
+    def expirou(self) -> bool:
+        """Conta de verdade nunca expira; demo expira na hora marcada."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(UTC) >= self.expires_at
 
     def __repr__(self) -> str:
         # Nao inclui o hash da senha. `repr()` de model aparece em log de erro e
