@@ -480,3 +480,46 @@ class TestTelaDeRebalanceamento:
         sugere um ganho de 35%."""
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         assert "proporcao(d.peso_atual)" in js and "proporcao(d.peso_alvo)" in js
+
+
+class TestTelaDeProjecao:
+    """A projeção por Monte Carlo.
+
+    O risco aqui não é a matemática — é a leitura. Um gráfico de projeção
+    parece uma previsão, e este projeto vende faixa de probabilidade, não
+    promessa.
+    """
+
+    def test_o_cartao_existe(self) -> None:
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="btn-projetar"' in html and 'id="g-projecao"' in html
+
+    def test_o_retorno_esperado_e_editavel(self) -> None:
+        """O retorno vem de estimativa histórica, e uma carteira que subiu numa
+        janela curta produz uma expectativa alta demais para projetar dez anos.
+        Campo travado transformaria premissa discutível em promessa."""
+        html = (ESTATICOS / "index.html").read_text()
+        trecho = html[html.index('id="proj-retorno"') :][:200]
+        assert "readonly" not in trecho and "disabled" not in trecho
+
+    def test_a_ressalva_do_modelo_chega_a_tela(self) -> None:
+        """A API manda `ressalva` dizendo que o modelo subestima crise. Não
+        exibir seria esconder a limitação de quem mais precisa dela."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "r.ressalva" in js
+
+    def test_mostra_o_percentil_5_e_nao_so_a_mediana(self) -> None:
+        """Reportar só a mediana esconderia exatamente a informação que motiva
+        a simulação: o cenário ruim."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("function renderProjecao") :]
+        assert "final.p5" in trecho and "final.p50" in trecho
+
+    def test_recalcular_a_fronteira_invalida_a_projecao(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        trecho = js[js.index("ultimaOtimizacao = r;") :][:500]
+        assert '$("#proj-resultado").hidden = true' in trecho
+
+    def test_aceita_percentual_com_virgula(self) -> None:
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert "percentualParaFracao" in js

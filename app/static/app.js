@@ -896,6 +896,8 @@ async function otimizar() {
     $("#aviso-modelo").textContent = r.aviso;
     // Recalcular a fronteira invalida o plano anterior: os pesos mudaram.
     $("#reb-resultado").hidden = true;
+    $("#proj-resultado").hidden = true;
+    preencherRetornoEsperado();
   } finally {
     botao.disabled = false;
     botao.textContent = "Recalcular";
@@ -1176,6 +1178,166 @@ function renderPlano(plano) {
   } else {
     aviso.hidden = true;
   }
+}
+
+/* ═══ Projeção (Monte Carlo) ═══ */
+
+// Ao trocar a carteira-alvo, o campo de retorno se preenche com o número dela
+// -- mas continua EDITÁVEL. Isso importa: o retorno esperado vem de estimativa
+// histórica, e uma carteira que subiu numa janela curta produz uma expectativa
+// alta demais para projetar dez anos. Deixar o campo travado transformaria uma
+// premissa discutível numa promessa.
+function preencherRetornoEsperado() {
+  const alvo = ultimaOtimizacao?.[$("#proj-carteira").value];
+  if (alvo) $("#proj-retorno").value = proporcao(alvo.retorno_esperado);
+}
+$("#proj-carteira").addEventListener("change", preencherRetornoEsperado);
+
+/** "12,5%" ou "12,5" -> 0.125. Devolve null se não for um número. */
+function percentualParaFracao(texto) {
+  const limpo = texto.trim().replace("%", "").replace(/\./g, "").replace(",", ".");
+  if (!/^-?\d+(\.\d+)?$/.test(limpo)) return null;
+  return Number(limpo) / 100;
+}
+
+$("#btn-projetar").addEventListener("click", async () => {
+  const aviso = $("#proj-aviso");
+  aviso.hidden = true;
+
+  if (!ultimaOtimizacao) {
+    aviso.textContent = "Calcule a fronteira primeiro — a projeção usa a volatilidade dela.";
+    aviso.hidden = false;
+    return;
+  }
+  const alvo = ultimaOtimizacao[$("#proj-carteira").value];
+  if (!alvo) {
+    aviso.textContent = "Esta carteira não foi calculada. Recalcule a fronteira.";
+    aviso.hidden = false;
+    return;
+  }
+
+  if (!$("#proj-retorno").value.trim()) preencherRetornoEsperado();
+  const retorno = percentualParaFracao($("#proj-retorno").value);
+  if (retorno === null || retorno <= -1) {
+    aviso.textContent = "Retorno esperado inválido. Use algo como 10,5%.";
+    aviso.hidden = false;
+    $("#proj-retorno").focus();
+    return;
+  }
+
+  const bruto = $("#proj-aporte").value.trim();
+  const aporte = bruto === "" ? "0" : paraNumeroDaApi(bruto);
+  if (aporte === null) {
+    aviso.textContent = "Aporte inválido. Use algo como 500,00.";
+    aviso.hidden = false;
+    $("#proj-aporte").focus();
+    return;
+  }
+
+  const botao = $("#btn-projetar");
+  botao.disabled = true;
+  botao.textContent = "Simulando…";
+  try {
+    const r = await api(comCarteira("/portfolio/simulate"), {
+      method: "POST",
+      body: JSON.stringify({
+        retorno_esperado: retorno,
+        volatilidade: alvo.volatilidade,
+        anos: Number($("#proj-anos").value),
+        aporte_mensal: aporte,
+      }),
+    });
+    renderProjecao(r, alvo.volatilidade);
+  } catch (e) {
+    aviso.textContent = e.message;
+    aviso.hidden = false;
+    $("#proj-resultado").hidden = true;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Simular";
+  }
+});
+
+function renderProjecao(r, volatilidade) {
+  $("#proj-resultado").hidden = false;
+
+  const ctx = $("#g-projecao").getContext("2d");
+  graficos.projecao?.destroy();
+
+  const anos = (p) => (p.mes / 12).toFixed(1);
+  // Um rótulo por ANO, não por mês: 240 rótulos num eixo de 20 anos viram
+  // uma tarja preta.
+  const rotulos = r.pontos.map((p) => (p.mes % 12 === 0 ? `${p.mes / 12}a` : ""));
+
+  const faixa = (chave, cor, preenche) => ({
+    label: chave,
+    data: r.pontos.map((p) => Number(p[chave])),
+    borderColor: cor,
+    backgroundColor: cor,
+    borderWidth: chave === "p50" ? 2.4 : 0,
+    fill: preenche,
+    tension: .2, pointRadius: 0, pointHoverRadius: 4,
+  });
+
+  graficos.projecao = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: rotulos,
+      // A ordem importa: cada faixa se preenche até a ANTERIOR (`fill: "-1"`),
+      // então as bandas saem empilhadas de baixo para cima.
+      datasets: [
+        faixa("p5", "rgba(123,92,255,.18)", false),
+        faixa("p25", "rgba(123,92,255,.18)", "-1"),
+        faixa("p50", "#7b5cff", "-1"),
+        faixa("p75", "rgba(123,92,255,.45)", "-1"),
+        faixa("p95", "rgba(123,92,255,.18)", "-1"),
+      ],
+    },
+    options: {
+      ...base({ ticks: { color: EIXO, callback: (v) => brl.format(v).replace(/\s/g, "") } }),
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
+          padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+          callbacks: {
+            title: (itens) => `Ano ${anos(r.pontos[itens[0].dataIndex])}`,
+            label: (c) => `${c.dataset.label}: ${brl.format(c.parsed.y)}`,
+          },
+        },
+      },
+    },
+  });
+
+  const final = r.pontos[r.pontos.length - 1];
+  const resumo = $("#proj-resumo");
+  limpar(resumo);
+  for (const [valor, rotulo] of [
+    [r.total_aportado, "você terá colocado"],
+    [final.p50, "mediana dos cenários"],
+    [final.p5, "5% ficam abaixo de"],
+  ]) {
+    const bloco = el("div");
+    bloco.append(el("b", null, brl.format(valor)), el("span", null, rotulo));
+    resumo.append(bloco);
+  }
+
+  // A frase é a entrega: o gráfico mostra a faixa, ela diz o que significa.
+  const frase = $("#proj-frase");
+  limpar(frase);
+  frase.append(document.createTextNode("Em metade dos cenários você passa de "));
+  frase.append(el("b", null, brl.format(final.p50)));
+  frase.append(document.createTextNode(". Em 5% deles, fica abaixo de "));
+  frase.append(el("b", null, brl.format(final.p5)));
+  frase.append(document.createTextNode(
+    `, tendo colocado ${brl.format(r.total_aportado)}. ` +
+    `A chance de terminar acima do que você colocou é de ` +
+    `${(r.prob_acima_do_aportado * 100).toFixed(1)}%.`
+  ));
+
+  $("#proj-ressalva").textContent =
+    `${r.ressalva} Volatilidade usada: ${proporcao(volatilidade)} ao ano, ` +
+    `de ${r.cenarios.toLocaleString("pt-BR")} cenários.`;
 }
 
 /* ═══ Transações ═══ */

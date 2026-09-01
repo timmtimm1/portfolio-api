@@ -16,7 +16,18 @@ from app.schemas.rebalance import (
     RebalanceRequest,
     RebalanceResponse,
 )
-from app.services import metrics_service, optimizer_service, portfolio_service, rebalance
+from app.schemas.simulation import ProjecaoPonto, SimulationRequest, SimulationResponse
+from app.services import (
+    metrics_service,
+    optimizer_service,
+    portfolio_service,
+    rebalance,
+    simulation,
+)
+
+# Semente do gerador da projecao. Fixa de proposito: ver o comentario na
+# rota `/portfolio/simulate`.
+_SEMENTE_DA_PROJECAO = 20260901
 
 router = APIRouter(tags=["metricas"])
 
@@ -188,4 +199,59 @@ async def rebalancear(
         total_vendas=plano.total_vendas,
         sobra=plano.sobra,
         sem_preco=plano.sem_preco,
+    )
+
+
+@router.post(
+    "/portfolio/simulate",
+    response_model=SimulationResponse,
+    summary="Projeta a carteira por simulacao de Monte Carlo",
+)
+async def simular(
+    carteira: CarteiraAtual,
+    db: DbDep,
+    provedor: ProvedorDep,
+    settings: SettingsDep,
+    pedido: SimulationRequest,
+) -> SimulationResponse:
+    """De todos os futuros plausiveis, como eles se distribuem?
+
+    Uma projecao de linha unica responde "quanto vou ter em 2032" -- e responde
+    errado, porque promete um numero que nao vai acontecer. Aqui sao sorteados
+    milhares de caminhos a partir da volatilidade da propria carteira, e o que
+    sai e uma FAIXA. A frase que sobra e de outra natureza: "em 5% dos cenarios
+    voce fica abaixo de X".
+
+    Isso mostra risco, nao so esperanca -- que numa ferramenta sobre dinheiro e
+    a diferenca entre informar e vender otimismo.
+
+    O valor inicial e lido da carteira, nao do pedido: ele e fato, nao premissa.
+    """
+    resumo = await portfolio_service.resumo(
+        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )
+    inicial = resumo.totals.valor_mercado
+
+    projecao = simulation.projetar(
+        inicial,
+        retorno_anual=pedido.retorno_esperado,
+        volatilidade_anual=pedido.volatilidade,
+        anos=pedido.anos,
+        aporte_mensal=pedido.aporte_mensal,
+        cenarios=pedido.cenarios,
+        # Semente fixa: dois cliques no mesmo botao, com os mesmos parametros,
+        # tem que dar o mesmo grafico. Sem isso o usuario nao saberia se algo
+        # mudou ou se e so o sorteio -- e reclamaria de um bug que nao existe.
+        semente=_SEMENTE_DA_PROJECAO,
+    )
+
+    return SimulationResponse(
+        pontos=[
+            ProjecaoPonto(mes=p.mes, p5=p.p5, p25=p.p25, p50=p.p50, p75=p.p75, p95=p.p95)
+            for p in projecao.pontos
+        ],
+        valor_inicial=inicial,
+        total_aportado=projecao.total_aportado,
+        prob_acima_do_aportado=projecao.prob_acima_do_aportado,
+        cenarios=projecao.cenarios,
     )

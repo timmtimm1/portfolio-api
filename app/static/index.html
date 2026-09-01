@@ -345,6 +345,64 @@
           </p>
         </div>
       </article>
+
+      <article class="cartao cartao-projecao">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Projeção</h2>
+            <p class="sub">Milhares de cenários sorteados da volatilidade da carteira</p>
+          </div>
+          <div class="legenda">
+            <span class="lg"><i style="background:#7b5cff"></i>mediana</span>
+            <span class="lg"><i style="background:rgba(123,92,255,.45)"></i>metade central</span>
+            <span class="lg"><i style="background:rgba(123,92,255,.18)"></i>90% dos cenários</span>
+          </div>
+        </div>
+
+        <div class="reb-controles">
+          <label class="campo">
+            <span>Carteira</span>
+            <select id="proj-carteira">
+              <option value="carteira_atual" selected>A minha, hoje</option>
+              <option value="maximo_sharpe">Máximo Sharpe</option>
+              <option value="minima_variancia">Mínima variância</option>
+            </select>
+          </label>
+
+          <label class="campo">
+            <span>Retorno esperado ao ano</span>
+            <input id="proj-retorno" type="text" inputmode="decimal" maxlength="7"
+                   autocomplete="off" placeholder="10,0%">
+          </label>
+
+          <label class="campo">
+            <span>Aporte mensal</span>
+            <input id="proj-aporte" type="text" inputmode="decimal" maxlength="14"
+                   autocomplete="off" placeholder="500,00">
+          </label>
+
+          <label class="campo">
+            <span>Prazo</span>
+            <select id="proj-anos">
+              <option value="3">3 anos</option>
+              <option value="5">5 anos</option>
+              <option value="10" selected>10 anos</option>
+              <option value="20">20 anos</option>
+            </select>
+          </label>
+
+          <button class="btn btn--primario btn--pequeno" id="btn-projetar">Simular</button>
+        </div>
+
+        <p class="aviso-comparacao" id="proj-aviso" hidden></p>
+
+        <div id="proj-resultado" hidden>
+          <div class="tela-grafico"><canvas id="g-projecao"></canvas></div>
+          <div class="reb-resumo" id="proj-resumo"></div>
+          <p class="proj-frase" id="proj-frase"></p>
+          <p class="reb-rodape" id="proj-ressalva"></p>
+        </div>
+      </article>
     </section>
 
     <!-- ── TRANSAÇÕES ── -->

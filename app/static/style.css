@@ -630,3 +630,18 @@ h1, h2, h3, p { margin: 0; }
    prejuízo no resto do app, e estar acima do alvo não é lucro. */
 .desvio { color: var(--txt-2); }
 .desvio--grande { color: var(--txt); font-weight: 600; }
+
+/* ══ Projeção ══ */
+.cartao-projecao { margin-top: 18px; }
+.cartao-projecao .tela-grafico { height: 300px; margin-bottom: 18px; }
+
+/* A frase é a entrega da simulação. O gráfico mostra a faixa; ela diz o que a
+   faixa significa, em português, com números. */
+.proj-frase {
+  font-size: 15px; line-height: 1.7; color: var(--txt);
+  padding: 16px 18px; margin-top: 16px;
+  background: var(--superficie-2);
+  border-left: 2px solid var(--violeta);
+  border-radius: 0 var(--r-s) var(--r-s) 0;
+}
+.proj-frase b { color: var(--violeta-2); }
