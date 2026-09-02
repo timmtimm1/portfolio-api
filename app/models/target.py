@@ -83,6 +83,16 @@ class AssetTarget(Base, TimestampMixin):
     )
     stop_loss_valor: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
+    # Meta de ACUMULACAO: quanto a pessoa quer ter neste ativo, em reais.
+    #
+    # Mora na mesma tabela dos stops por dividir exatamente a mesma chave
+    # (carteira + ativo) e o mesmo ciclo de vida -- uma tabela separada
+    # duplicaria migration, servico, consulta e upsert para guardar uma
+    # coluna. Mas e outra pergunta: o stop olha o PRECO ("quando sair"), a
+    # meta olha o TAMANHO da posicao ("quanto ainda comprar"). Uma pode
+    # existir sem a outra.
+    meta_valor: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+
     __table_args__ = (
         # Tipo e valor andam juntos: um sem o outro e configuracao pela metade
         # que o dominio nao sabe interpretar (percentual de que? preco de
@@ -102,6 +112,7 @@ class AssetTarget(Base, TimestampMixin):
         CheckConstraint(
             "stop_loss_valor IS NULL OR stop_loss_valor > 0", name="stop_loss_valor_positivo"
         ),
+        CheckConstraint("meta_valor IS NULL OR meta_valor > 0", name="meta_valor_positiva"),
     )
 
     def __repr__(self) -> str:
