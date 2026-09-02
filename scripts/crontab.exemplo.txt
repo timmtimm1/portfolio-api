@@ -1,0 +1,11 @@
+# Fecha a cadeia de atualizacao do historico de precos.
+#
+# 19h10, seg a sex -- 10 minutos depois do cron do `mercado_financeiro`
+# (19h00), que por sua vez roda ~45 min depois do GitHub Actions (18h15).
+# A margem e so conforto: o proprio script faz `git pull --ff-only` e e
+# seguro de rodar antes, depois ou ao mesmo tempo que o outro cron.
+#
+# Instalar: crontab -e, colar a linha abaixo (sem o '#').
+# Ver o log: tail -f /home/timm/Projects/portfolio-api/logs/atualizar_historico.log
+
+10 19 * * 1-5 /home/timm/Projects/portfolio-api/scripts/atualizar_historico.sh
