@@ -124,6 +124,10 @@
         <span class="selo" id="selo-atualizado">—</span>
       </div>
 
+      <!-- Alvo batido só aparecia em Posições. Quem abre o app na Visão geral
+           não tinha como saber que algo aconteceu sem navegar até lá. -->
+      <div class="faixa-alvos" id="faixa-alvos" hidden></div>
+
       <div class="grade-topo">
         <div class="kpis">
           <article class="cartao kpi">
@@ -243,6 +247,21 @@
         <h1>Posições</h1>
         <button class="btn btn--fantasma btn--pequeno" id="btn-meta-carteira">Meta da carteira</button>
       </div>
+
+      <!-- Mesmo papel do card do Markowitz na Fronteira: a tela mostra o QUE
+           está acontecendo, o card explica POR QUE aquilo existe. -->
+      <article class="cartao cartao--explica" id="explica-alvo">
+        <span class="explica-ic" aria-hidden="true"></span>
+        <div>
+          <strong>O alvo é um lembrete, não uma ordem</strong>
+          <p>
+            Este app não é uma corretora e não vende nada por você. Definir um alvo
+            aqui é dizer <em>"me avise quando chegar"</em> — quando o preço cruza a
+            linha, o selo do papel muda de cor e um aviso aparece na Visão geral.
+            A ordem de venda continua sendo sua, na sua corretora.
+          </p>
+        </div>
+      </article>
 
       <!-- ── Progresso das metas de acumulação ── -->
       <article class="cartao cartao--meta" id="cartao-meta">
@@ -541,13 +560,40 @@
         Isto não vende nada sozinho -- é um lembrete visual. A decisão continua sua.
       </p>
 
+      <!-- A régua é o controle principal: arrastar é mais direto que digitar
+           quando a pergunta é "onde", não "quanto". Atrás do trilho fica uma
+           faixa de densidade -- em que preços o papel passou mais tempo nos
+           últimos meses. Mesmo eixo (preço), então sobrepõe sem distorcer. -->
+      <div class="regua" id="regua-alvo">
+        <div class="regua-trilho" id="regua-trilho">
+          <div class="regua-densidade" id="regua-densidade"></div>
+          <div class="regua-faixa" id="regua-faixa"></div>
+          <div class="regua-hoje" id="regua-hoje"><span></span></div>
+          <button type="button" class="regua-punho regua-punho--loss" id="punho-loss"
+                  role="slider" aria-label="Preço de saída no prejuízo" hidden></button>
+          <button type="button" class="regua-punho regua-punho--gain" id="punho-gain"
+                  role="slider" aria-label="Preço de venda no lucro" hidden></button>
+        </div>
+        <div class="regua-escala">
+          <span id="regua-min"></span>
+          <span class="regua-hoje-rotulo" id="regua-hoje-rotulo"></span>
+          <span id="regua-max"></span>
+        </div>
+        <p class="regua-ajuda" id="regua-ajuda">Arraste os marcadores, ou digite abaixo.</p>
+      </div>
+
+      <div class="cenarios">
+        <p class="cenario cenario--gain" id="cenario-gain" hidden></p>
+        <p class="cenario cenario--loss" id="cenario-loss" hidden></p>
+      </div>
+
       <fieldset class="alvo-secao">
-        <legend>Stop gain</legend>
+        <legend>Quero vender com lucro quando chegar em <i>stop gain</i></legend>
         <div class="alvo-linha">
           <select id="alvo-gain-tipo">
-            <option value="">Sem alvo</option>
-            <option value="percentual">% acima do preço médio</option>
-            <option value="preco">Preço fixo</option>
+            <option value="">Não quero definir</option>
+            <option value="percentual">% acima do que paguei</option>
+            <option value="preco">um preço específico</option>
           </select>
           <input id="alvo-gain-valor" type="number" step="any" min="0" placeholder="ex: 15" disabled>
         </div>
@@ -555,27 +601,23 @@
       </fieldset>
 
       <fieldset class="alvo-secao">
-        <legend>Stop loss</legend>
+        <legend>Quero sair se cair até <i>stop loss</i></legend>
         <div class="alvo-linha">
           <select id="alvo-loss-tipo">
-            <option value="">Sem alvo</option>
-            <option value="percentual">% abaixo do preço médio</option>
-            <option value="preco">Preço fixo</option>
+            <option value="">Não quero definir</option>
+            <option value="percentual">% abaixo do que paguei</option>
+            <option value="preco">um preço específico</option>
           </select>
           <input id="alvo-loss-valor" type="number" step="any" min="0" placeholder="ex: 8" disabled>
         </div>
         <span class="campo-dica" id="alvo-loss-dica" hidden></span>
       </fieldset>
 
-      <!-- Meta de acumulação: outra pergunta que o stop. O stop olha o PREÇO
-           ("quando sair"); a meta olha o TAMANHO da posição ("quanto ainda
-           comprar"). Ficam no mesmo modal porque são as duas decisões que
-           alguém toma sobre o mesmo papel, mas separadas por um divisor. -->
       <fieldset class="alvo-secao alvo-secao--meta">
-        <legend>Meta de acumulação</legend>
+        <legend>Quanto quero ter neste papel <i>meta de acumulação</i></legend>
         <div class="alvo-linha alvo-linha--meta">
           <input id="alvo-meta-valor" type="number" step="any" min="0"
-                 placeholder="quanto quero ter neste papel, em R$">
+                 placeholder="valor total em R$, ex: 5000">
         </div>
         <span class="campo-dica" id="alvo-meta-dica" hidden></span>
       </fieldset>

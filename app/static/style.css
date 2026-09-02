@@ -875,3 +875,118 @@ h1, h2, h3, p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .barra-preenchida, .barra-marcador { transition: none; }
 }
+
+/* ══ RÉGUA DE ALVO (arrastável) ══ */
+
+.regua { display: grid; gap: 8px; }
+
+.regua-trilho {
+  position: relative; height: 46px;
+  border-radius: var(--r-s);
+  background: rgba(10, 9, 20, .6);
+  border: 1px solid var(--borda);
+  overflow: hidden;
+  touch-action: none;   /* o arrasto é nosso, não do scroll da página */
+}
+
+/* Onde o preço passou mais tempo nos últimos meses. Mesmo eixo do trilho
+   (preço), então sobrepõe sem distorcer -- um gráfico de linha teria o preço
+   no eixo vertical e não daria para encostar um no outro. */
+.regua-densidade { position: absolute; inset: 0; display: flex; align-items: flex-end; }
+.regua-densidade i {
+  flex: 1; background: var(--violeta-2); opacity: .16;
+  border-radius: 1px 1px 0 0;
+}
+
+/* A área entre os dois alvos: onde o preço "pode ficar" sem acionar nada. */
+.regua-faixa {
+  position: absolute; top: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(251,113,133,.14), rgba(52,211,153,.14));
+  border-left: 1px solid rgba(251,113,133,.5);
+  border-right: 1px solid rgba(52,211,153,.5);
+  pointer-events: none;
+}
+
+.regua-hoje { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--txt); pointer-events: none; }
+.regua-hoje span {
+  position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--txt);
+  box-shadow: 0 0 8px rgba(233,231,243,.7);
+}
+
+.regua-punho {
+  position: absolute; top: 0; bottom: 0; width: 22px;
+  transform: translateX(-50%);
+  background: none; border: 0; padding: 0; cursor: grab;
+  display: grid; place-items: center;
+}
+.regua-punho:active { cursor: grabbing; }
+.regua-punho::before {
+  content: ""; width: 5px; height: 30px; border-radius: 3px;
+  transition: transform .12s, box-shadow .12s;
+}
+.regua-punho--gain::before { background: var(--verde); box-shadow: 0 0 10px rgba(52,211,153,.5); }
+.regua-punho--loss::before { background: var(--vermelho); box-shadow: 0 0 10px rgba(251,113,133,.5); }
+.regua-punho:hover::before, .regua-punho:focus-visible::before { transform: scaleY(1.18); }
+.regua-punho:focus-visible { outline: none; }
+.regua-punho:focus-visible::before { box-shadow: 0 0 0 3px rgba(123,92,255,.45); }
+
+.regua-escala {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums;
+}
+.regua-hoje-rotulo { color: var(--txt-2); font-weight: 600; }
+.regua-ajuda { font-size: 11.5px; color: var(--txt-3); text-align: center; }
+
+/* ══ Cenários ("se subir X, você...") ══
+   Frase inteira em vez de números soltos: "R$ 1.935,00 (+R$ 252,45)" exige
+   que a pessoa monte a história na cabeça; a frase já entrega montada. */
+.cenarios { display: grid; gap: 6px; }
+.cenario {
+  font-size: 12.5px; line-height: 1.5;
+  padding: 8px 11px; border-radius: var(--r-s);
+  border: 1px solid var(--borda);
+}
+.cenario b { font-variant-numeric: tabular-nums; }
+.cenario--gain { background: rgba(52,211,153,.07); border-color: rgba(52,211,153,.22); color: var(--txt-2); }
+.cenario--gain b { color: var(--verde); }
+.cenario--loss { background: rgba(251,113,133,.07); border-color: rgba(251,113,133,.22); color: var(--txt-2); }
+.cenario--loss b { color: var(--vermelho); }
+
+/* O termo de mercado como legenda: quem conhece se localiza, quem não
+   conhece não precisa dele para entender a pergunta. */
+.alvo-secao legend i {
+  font-style: normal; font-size: 10.5px; font-weight: 500;
+  color: var(--txt-3); letter-spacing: .04em;
+  background: rgba(255,255,255,.05); border-radius: 5px;
+  padding: 2px 6px; margin-left: 6px;
+}
+
+/* ══ Aviso de alvo batido na Visão geral ══ */
+.faixa-alvos {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 16px;
+  border-radius: var(--r-s);
+  background: linear-gradient(90deg, rgba(52,211,153,.12), rgba(52,211,153,.04));
+  border: 1px solid rgba(52,211,153,.3);
+}
+.faixa-alvos[data-tem-loss="true"] {
+  background: linear-gradient(90deg, rgba(251,113,133,.12), rgba(251,113,133,.04));
+  border-color: rgba(251,113,133,.3);
+}
+.faixa-alvos strong { font-size: 13.5px; }
+.faixa-alvos p { font-size: 12.5px; color: var(--txt-2); margin: 0; }
+.faixa-alvos .btn { margin-left: auto; }
+
+
+/* ══ Card explicativo (mesmo papel do card do Markowitz) ══ */
+.cartao--explica { display: flex; gap: 14px; align-items: flex-start; }
+.explica-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 10px;
+  background: rgba(123, 92, 255, .16);
+  display: grid; place-items: center;
+}
+.explica-ic::before { content: "?"; color: var(--violeta-2); font-weight: 700; font-size: 16px; }
+.cartao--explica strong { display: block; font-size: 13.5px; margin-bottom: 4px; }
+.cartao--explica p { font-size: 12.5px; color: var(--txt-2); line-height: 1.6; margin: 0; }
+.cartao--explica em { color: var(--txt); font-style: normal; font-weight: 600; }
