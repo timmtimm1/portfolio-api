@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,7 +46,14 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Sendo um usuario como outro qualquer, nao ha codigo novo de escopo para
     # revisar, e os testes que ja protegem o isolamento passam a proteger a demo
     # de graca.
-    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # `default` (Python, ao inserir pelo ORM) E `server_default` (DDL, para
+    # quem insere por fora do ORM) juntos, de proposito. So o Python bastaria
+    # para o app -- mas deixava o model e o banco discordando um do outro, e
+    # todo `alembic revision --autogenerate` seguinte reencontrava essa
+    # diferenca e tentava desfazer o default do banco outra vez.
+    is_demo: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa.false(), nullable=False
+    )
 
     # Quando a conta deixa de valer. Nulo em conta de verdade -- ela nao expira.
     #
