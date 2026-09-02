@@ -774,3 +774,104 @@ h1, h2, h3, p { margin: 0; }
   box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
 }
 .alvo-linha input:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ══ BARRAS DE META (tela de Posições) ══
+   Barras horizontais empilhadas: o alinhamento vertical é o que torna a
+   comparação entre papéis imediata -- foi por isso que o formato foi
+   escolhido em vez de anéis. */
+
+.cartao--meta { display: grid; gap: 16px; }
+
+.selo-nao-distribuido {
+  font-size: 11.5px; font-weight: 600;
+  color: var(--ouro); background: rgba(245, 181, 74, .1);
+  border: 1px solid rgba(245, 181, 74, .28);
+  padding: 5px 11px; border-radius: 999px; white-space: nowrap;
+}
+
+/* A barra da carteira inteira: mesma anatomia das outras, escala maior.
+   Fica destacada porque é a única pergunta que a pessoa faz sobre o
+   conjunto -- as por papel respondem "onde eu ponho o próximo aporte". */
+.meta-total {
+  background: linear-gradient(135deg, rgba(123, 92, 255, .14), rgba(255, 79, 163, .07));
+  border: 1px solid rgba(123, 92, 255, .22);
+  border-radius: var(--r-s);
+  padding: 16px 18px;
+  display: grid; gap: 10px;
+}
+.meta-total-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.meta-total-rotulo { font-size: 12px; color: var(--txt-2); font-weight: 600; letter-spacing: .02em; }
+.meta-total-numeros { font-family: inherit; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--txt-2); }
+.meta-total-numeros b { color: var(--txt); font-size: 15px; }
+
+.barras { display: grid; gap: 14px; }
+
+.barra { display: grid; gap: 7px; cursor: pointer; }
+.barra:hover .barra-trilho { border-color: var(--borda-forte); }
+.barra:hover .barra-ticker { color: var(--violeta-2); }
+
+.barra-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.barra-ticker { font-weight: 700; font-size: 13.5px; transition: color .16s; }
+.barra-numeros {
+  font-size: 12px; color: var(--txt-3);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.barra-numeros b { color: var(--txt-2); font-weight: 600; }
+
+.barra-trilho {
+  position: relative; height: 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--borda);
+  overflow: hidden;
+  transition: border-color .16s;
+}
+.barra-preenchida {
+  position: absolute; inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--violeta), var(--magenta));
+  /* A largura anima na primeira pintura: a barra "cresce" até a posição,
+     que é o que faz o progresso ser lido como movimento e não como um
+     retângulo estático. */
+  transition: width .7s cubic-bezier(.22, 1, .36, 1);
+}
+/* Meta batida muda de cor, não só de tamanho -- 100% e 140% desenhariam a
+   mesma barra cheia, e a cor é o que separa "chegou" de "passou". */
+.barra-preenchida[data-atingida="true"] {
+  background: linear-gradient(90deg, var(--verde), #6ee7b7);
+}
+.barra-pct {
+  font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--violeta-2); min-width: 44px; text-align: right;
+}
+.barra-pct[data-atingida="true"] { color: var(--verde); }
+
+/* ══ Barra de faixa (distância até o alvo) ══
+   Aqui o trilho não é "0 até a meta", é "stop loss até stop gain" -- e o
+   que importa é ONDE o preço está dentro dessa faixa. Por isso um marcador
+   em vez de preenchimento. */
+.barras--faixa .barra-trilho {
+  height: 8px;
+  background: linear-gradient(90deg,
+    rgba(251, 113, 133, .35), rgba(255, 255, 255, .06) 50%, rgba(52, 211, 153, .35));
+  overflow: visible;
+}
+.barra-marcador {
+  position: absolute; top: 50%; width: 3px; height: 18px;
+  border-radius: 2px; background: var(--txt);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px rgba(233, 231, 243, .5);
+  transition: left .7s cubic-bezier(.22, 1, .36, 1);
+}
+.barra-extremos {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums;
+}
+.barra-extremos .perto-loss { color: var(--vermelho); }
+.barra-extremos .perto-gain { color: var(--verde); }
+
+.alvo-secao--meta { border-top: 1px solid var(--borda); padding-top: 14px; }
+.alvo-linha--meta { grid-template-columns: 1fr; }
+
+@media (prefers-reduced-motion: reduce) {
+  .barra-preenchida, .barra-marcador { transition: none; }
+}

@@ -239,7 +239,38 @@
 
     <!-- ── POSIÇÕES ── -->
     <section class="vista" data-vista="posicoes" hidden>
-      <div class="titulo-linha"><h1>Posições</h1></div>
+      <div class="titulo-linha">
+        <h1>Posições</h1>
+        <button class="btn btn--fantasma btn--pequeno" id="btn-meta-carteira">Meta da carteira</button>
+      </div>
+
+      <!-- ── Progresso das metas de acumulação ── -->
+      <article class="cartao cartao--meta" id="cartao-meta">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Quanto falta para a meta</h2>
+            <p class="sub">O quanto já foi acumulado de cada objetivo</p>
+          </div>
+          <span class="selo-nao-distribuido" id="nao-distribuido" hidden></span>
+        </div>
+
+        <div class="meta-total" id="meta-total" hidden></div>
+        <div class="barras" id="barras-meta"></div>
+        <p class="vazio-explicado" id="meta-vazia" hidden></p>
+      </article>
+
+      <!-- ── Distância até o alvo de preço ── -->
+      <article class="cartao" id="cartao-distancia">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Distância até o alvo de preço</h2>
+            <p class="sub">Onde a cotação está entre o seu stop loss e o stop gain</p>
+          </div>
+        </div>
+        <div class="barras barras--faixa" id="barras-distancia"></div>
+        <p class="vazio-explicado" id="distancia-vazia" hidden></p>
+      </article>
+
       <article class="cartao">
         <div class="tabela-envolve">
           <table class="tabela" id="tabela-posicoes">
@@ -534,6 +565,19 @@
           <input id="alvo-loss-valor" type="number" step="any" min="0" placeholder="ex: 8" disabled>
         </div>
         <span class="campo-dica" id="alvo-loss-dica" hidden></span>
+      </fieldset>
+
+      <!-- Meta de acumulação: outra pergunta que o stop. O stop olha o PREÇO
+           ("quando sair"); a meta olha o TAMANHO da posição ("quanto ainda
+           comprar"). Ficam no mesmo modal porque são as duas decisões que
+           alguém toma sobre o mesmo papel, mas separadas por um divisor. -->
+      <fieldset class="alvo-secao alvo-secao--meta">
+        <legend>Meta de acumulação</legend>
+        <div class="alvo-linha alvo-linha--meta">
+          <input id="alvo-meta-valor" type="number" step="any" min="0"
+                 placeholder="quanto quero ter neste papel, em R$">
+        </div>
+        <span class="campo-dica" id="alvo-meta-dica" hidden></span>
       </fieldset>
 
       <p class="erro" id="alvo-erro" role="alert" hidden></p>

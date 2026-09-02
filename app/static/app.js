@@ -518,6 +518,7 @@ function seloDeAlvo(p) {
 }
 
 let alvoTickerAtual = null;
+let metaDaCarteiraAtual = null;
 
 // Cada input de valor guarda um numero "de gente": 15 para 15%, nao 0.15. A
 // API guarda fracao -- a conversao acontece so nas duas bordas (aqui e no
@@ -600,18 +601,67 @@ function abrirModalAlvo(p) {
   alvoTickerAtual = p.ticker;
   $("#alvo-ticker").textContent = p.ticker;
   $("#alvo-erro").hidden = true;
-  $("#alvo-remover").hidden = p.alvo.status === "sem_alvo";
+  $("#alvo-remover").hidden = p.alvo.status === "sem_alvo" && !p.alvo.meta;
 
   prepararLadoDoAlvo("gain", p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, p);
   prepararLadoDoAlvo("loss", p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, p);
+  prepararMetaDoAlvo(p);
 
   $("#modal-alvo").hidden = false;
+}
+
+// A dica da meta responde a pergunta que a barra não cabe: quanto ainda
+// falta em reais, e quantas ações isso dá no preço de hoje -- que é o número
+// que se leva para a corretora.
+function prepararMetaDoAlvo(p) {
+  const input = $("#alvo-meta-valor");
+  input.value = p.alvo.meta ? num(p.alvo.meta.meta) : "";
+
+  const atualizar = () => {
+    const dica = $("#alvo-meta-dica");
+    const meta = Number(input.value);
+    const atual = Number(p.valor_mercado ?? p.custo_total);
+    const preco = Number(p.preco_atual);
+    if (!meta) {
+      dica.hidden = true;
+      return;
+    }
+    const falta = Math.max(0, meta - atual);
+    const acoes = preco ? Math.floor(falta / preco) : null;
+    dica.textContent =
+      falta === 0
+        ? `Já tem ${brl.format(atual)} — meta batida.`
+        : `Tem ${brl.format(atual)} · faltam ${brl.format(falta)}` +
+          (acoes !== null ? ` (~${num(acoes)} ações a ${brl.format(preco)})` : "");
+    dica.hidden = false;
+  };
+  atualizar();
+  input.oninput = atualizar;
 }
 
 function fecharModalAlvo() {
   $("#modal-alvo").hidden = true;
   alvoTickerAtual = null;
 }
+
+$("#btn-meta-carteira").addEventListener("click", async () => {
+  // `prompt` aqui, e não um modal: é um campo só, e criar uma segunda janela
+  // para uma pergunta única seria mais tela do que a decisão merece.
+  const atual = metaDaCarteiraAtual ? num(metaDaCarteiraAtual) : "";
+  const resposta = prompt("Meta de patrimônio da carteira, em R$ (vazio remove):", atual);
+  if (resposta === null) return;
+  const valor = resposta.trim() === "" ? null : Number(resposta.replace(",", "."));
+  if (valor !== null && !(valor > 0)) {
+    alert("Informe um valor maior que zero, ou deixe vazio para remover.");
+    return;
+  }
+  try {
+    await api(comCarteira("/portfolio/goal"), { method: "PUT", body: JSON.stringify({ valor }) });
+    await carregarPosicoes();
+  } catch (e) {
+    alert(e.message);
+  }
+});
 
 $("#alvo-fechar").addEventListener("click", fecharModalAlvo);
 // Clicar no fundo escurecido fecha; clicar dentro do cartão, não -- o evento
@@ -648,6 +698,7 @@ $("#form-alvo").addEventListener("submit", async (ev) => {
         stop_gain_valor: gain.valor,
         stop_loss_tipo: loss.tipo,
         stop_loss_valor: loss.valor,
+        meta_valor: Number($("#alvo-meta-valor").value) || null,
       }),
     });
     fecharModalAlvo();
@@ -1086,12 +1137,193 @@ $("#btn-sync-proventos").addEventListener("click", async (ev) => {
 
 /* ═══ Posições ═══ */
 
+/* ═══ Barras de meta e de distância até o alvo ═══ */
+
+// A barra cresce da esquerda até a posição; acima de 100% ela para no fim do
+// trilho, e a COR (verde) passa a contar que a meta foi superada -- 100% e
+// 140% desenhariam o mesmo retângulo cheio.
+function barraDeMeta(p) {
+  const m = p.alvo.meta;
+  const barra = el("div", "barra");
+  barra.addEventListener("click", () => abrirModalAlvo(p));
+
+  const topo = el("div", "barra-topo");
+  topo.append(el("strong", "barra-ticker", p.ticker));
+  const numeros = el("div", "barra-numeros");
+  numeros.append(el("b", null, brl.format(m.atual)));
+  numeros.append(
+    document.createTextNode(
+      m.atingida
+        ? ` de ${brl.format(m.meta)} · meta batida`
+        : ` de ${brl.format(m.meta)} · faltam ${brl.format(m.falta)}`,
+    ),
+  );
+  topo.append(numeros);
+  barra.append(topo);
+
+  const linha = el("div", "barra-linha");
+  linha.style.display = "grid";
+  linha.style.gridTemplateColumns = "1fr auto";
+  linha.style.alignItems = "center";
+  linha.style.gap = "10px";
+
+  const trilho = el("div", "barra-trilho");
+  const cheio = el("div", "barra-preenchida");
+  cheio.dataset.atingida = String(m.atingida);
+  // Começa em 0 e só depois vai para a largura final: sem os dois quadros,
+  // o navegador pinta direto no valor e a transição não acontece.
+  cheio.style.width = "0%";
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      cheio.style.width = `${Math.min(Number(m.progresso), 1) * 100}%`;
+    }),
+  );
+  trilho.append(cheio);
+  linha.append(trilho);
+
+  const pct = el("span", "barra-pct", proporcao(m.progresso, 0));
+  pct.dataset.atingida = String(m.atingida);
+  linha.append(pct);
+  barra.append(linha);
+  return barra;
+}
+
+// Onde a cotação está entre o stop loss e o stop gain. Quando só um lado
+// está configurado, o preço médio faz o papel do outro extremo -- sem uma
+// referência, "a 3% do alvo" não teria escala nenhuma.
+function barraDeDistancia(p) {
+  const precoMedio = Number(p.preco_medio);
+  const atual = Number(p.preco_atual);
+  const gain = p.alvo.stop_gain_tipo
+    ? contasDoAlvo(p, p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, 1).limite
+    : null;
+  const loss = p.alvo.stop_loss_tipo
+    ? contasDoAlvo(p, p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, -1).limite
+    : null;
+
+  const inicio = loss ?? precoMedio;
+  const fim = gain ?? precoMedio;
+  if (!(fim > inicio)) return null;
+
+  const barra = el("div", "barra");
+  barra.addEventListener("click", () => abrirModalAlvo(p));
+
+  const topo = el("div", "barra-topo");
+  topo.append(el("strong", "barra-ticker", p.ticker));
+  const faltaPara = gain !== null && atual < gain ? (gain / atual - 1) : null;
+  topo.append(
+    el(
+      "div",
+      "barra-numeros",
+      faltaPara !== null
+        ? `cotação ${brl.format(atual)} · faltam ${proporcao(faltaPara)} para o gain`
+        : `cotação ${brl.format(atual)}`,
+    ),
+  );
+  barra.append(topo);
+
+  const trilho = el("div", "barra-trilho");
+  const marcador = el("div", "barra-marcador");
+  const posicao = Math.min(Math.max((atual - inicio) / (fim - inicio), 0), 1);
+  marcador.style.left = "50%";
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      marcador.style.left = `${posicao * 100}%`;
+    }),
+  );
+  marcador.title = `Cotação atual: ${brl.format(atual)}`;
+  trilho.append(marcador);
+  barra.append(trilho);
+
+  const extremos = el("div", "barra-extremos");
+  extremos.append(
+    el("span", loss !== null ? "perto-loss" : "", loss !== null ? `stop loss ${brl.format(loss)}` : `médio ${brl.format(precoMedio)}`),
+  );
+  extremos.append(
+    el("span", gain !== null ? "perto-gain" : "", gain !== null ? `stop gain ${brl.format(gain)}` : `médio ${brl.format(precoMedio)}`),
+  );
+  barra.append(extremos);
+  return barra;
+}
+
+function renderMetas(resumo) {
+  const alvoTotal = $("#meta-total");
+  const meta = resumo.meta;
+  metaDaCarteiraAtual = meta.progresso ? meta.progresso.meta : null;
+
+  // Meta da carteira inteira
+  limpar(alvoTotal);
+  alvoTotal.hidden = !meta.progresso;
+  if (meta.progresso) {
+    const g = meta.progresso;
+    const topo = el("div", "meta-total-topo");
+    topo.append(el("span", "meta-total-rotulo", "CARTEIRA INTEIRA"));
+    const numeros = el("span", "meta-total-numeros");
+    numeros.append(el("b", null, brl.format(g.atual)));
+    numeros.append(
+      document.createTextNode(
+        g.atingida ? ` de ${brl.format(g.meta)} · meta batida` : ` de ${brl.format(g.meta)} · faltam ${brl.format(g.falta)}`,
+      ),
+    );
+    topo.append(numeros);
+    alvoTotal.append(topo);
+
+    const trilho = el("div", "barra-trilho");
+    const cheio = el("div", "barra-preenchida");
+    cheio.dataset.atingida = String(g.atingida);
+    cheio.style.width = "0%";
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        cheio.style.width = `${Math.min(Number(g.progresso), 1) * 100}%`;
+      }),
+    );
+    trilho.append(cheio);
+    alvoTotal.append(trilho);
+  }
+
+  // "Ainda sem destino": a diferença entre a meta geral e a soma das metas
+  // por papel. É o número que justifica ter as duas coisas.
+  const selo = $("#nao-distribuido");
+  const sobra = meta.nao_distribuido === null ? null : Number(meta.nao_distribuido);
+  mostrarSe(selo, sobra !== null && sobra > 0 ? `${brl.format(sobra)} ainda sem destino` : "");
+
+  // Barras por papel
+  const lista = $("#barras-meta");
+  limpar(lista);
+  const comMeta = resumo.positions.filter((p) => p.alvo.meta);
+  comMeta.sort((a, b) => Number(b.alvo.meta.progresso) - Number(a.alvo.meta.progresso));
+  comMeta.forEach((p) => lista.append(barraDeMeta(p)));
+
+  mostrarSe(
+    $("#meta-vazia"),
+    comMeta.length || meta.progresso
+      ? ""
+      : "Nenhuma meta definida ainda. Clique no alvo de um papel na tabela abaixo para dizer quanto quer ter dele.",
+  );
+
+  // Distância até o alvo de preço
+  const faixas = $("#barras-distancia");
+  limpar(faixas);
+  const barras = resumo.positions
+    .filter((p) => p.preco_atual && p.alvo.status !== "sem_alvo")
+    .map(barraDeDistancia)
+    .filter(Boolean);
+  barras.forEach((b) => faixas.append(b));
+  mostrarSe(
+    $("#distancia-vazia"),
+    barras.length ? "" : "Nenhum stop gain ou stop loss definido ainda.",
+  );
+  $("#cartao-distancia").hidden = barras.length === 0 && comMeta.length === 0;
+}
+
 async function carregarPosicoes() {
   carregado.posicoes = true;
   const [resumo, metricas] = await Promise.all([
     api(comCarteira("/portfolio/summary")),
     api(comCarteira("/portfolio/metrics")),
   ]);
+
+  renderMetas(resumo);
 
   const corpo = $("#tabela-posicoes tbody");
   limpar(corpo);
