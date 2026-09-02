@@ -97,6 +97,19 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 const pct = (v, casas = 2) =>
   `${v >= 0 ? "+" : ""}${(v * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
 const num = (v) => Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 8 });
+
+/** Valor para dentro de um `<input type="number">`.
+ *
+ * NUNCA use `num()` para isso. `num(2500)` devolve "2.500" (ponto de milhar
+ * do pt-BR), e um campo numérico lê esse ponto como separador DECIMAL: o
+ * valor vira 2,5. Com "1.234,56" é pior -- o campo recusa e fica vazio.
+ * Nos dois casos o estrago só aparece ao salvar, com o número já trocado.
+ *
+ * O campo quer o número cru; quem formata bonito é o texto ao lado dele. */
+const paraCampoNumerico = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : "";
+};
 /** Proporção (0.35 -> "35,0%"). Sem sinal: peso não é variação. */
 const proporcao = (v, casas = 1) =>
   `${(Number(v) * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
@@ -448,6 +461,7 @@ async function carregarVisao() {
   desenharEvolucao(evolucao);
   carregarProventos().catch(() => {});
   renderPosicoesResumo(resumo.positions);
+  renderFaixaDeAlvos(resumo);
   renderOperacoesResumo(await api(comCarteira("/transactions?limit=5")));
 }
 
@@ -570,14 +584,23 @@ function prepararLadoDoAlvo(prefixo, tipo, valor, posicao) {
 
   selectTipo.value = tipo ?? "";
   inputValor.disabled = !tipo;
-  inputValor.value = tipo === "percentual" ? num(Number(valor) * 100) : tipo === "preco" ? num(valor) : "";
+  inputValor.value =
+    tipo === "percentual"
+      ? paraCampoNumerico(Number(valor) * 100)
+      : tipo === "preco"
+        ? paraCampoNumerico(valor)
+        : "";
 
-  const atualizar = () => atualizarDicaDoAlvo(prefixo, posicao, prefixo === "gain" ? 1 : -1);
+  const atualizar = () => {
+    atualizarDicaDoAlvo(prefixo, posicao, prefixo === "gain" ? 1 : -1);
+    sincronizarRegua(posicao);
+  };
   atualizar();
   selectTipo.onchange = () => {
     inputValor.disabled = !selectTipo.value;
     inputValor.value = "";
     dica.hidden = true;
+    sincronizarRegua(posicao);
   };
   inputValor.oninput = atualizar;
 }
@@ -597,6 +620,224 @@ function atualizarDicaDoAlvo(prefixo, posicao, sinal) {
   dica.hidden = false;
 }
 
+
+/* ═══ Régua arrastável do alvo ═══
+   O controle principal do modal. Arrastar responde "onde", que é a pergunta
+   real -- digitar responde "quanto", que é a mesma decisão num formato que
+   exige converter de cabeça. Os dois ficam sincronizados nos dois sentidos. */
+
+// Estado da régua enquanto o modal está aberto. Global e não por closure
+// porque o arrasto, o teclado e os campos de texto mexem todos no mesmo
+// alvo, e passar isso por parâmetro em cinco funções só empurraria o
+// acoplamento para as assinaturas.
+let regua = null;
+
+// Domínio de preço da régua. Sempre contém o preço médio, a cotação e os
+// dois alvos, com folga -- um alvo fora do trilho seria impossível de
+// arrastar de volta.
+function dominioDaRegua(p, gain, loss) {
+  const medio = Number(p.preco_medio);
+  const pontos = [medio, Number(p.preco_atual) || medio, gain, loss].filter(
+    (v) => v !== null && Number.isFinite(v) && v > 0,
+  );
+  const menor = Math.min(...pontos, medio * 0.6);
+  const maior = Math.max(...pontos, medio * 1.4);
+  const folga = (maior - menor) * 0.12;
+  return { min: Math.max(0.01, menor - folga), max: maior + folga };
+}
+
+const pctDaRegua = (preco) => ((preco - regua.min) / (regua.max - regua.min)) * 100;
+const precoDaRegua = (pct) => regua.min + (pct / 100) * (regua.max - regua.min);
+
+// Barras de densidade: em que preços o papel passou mais tempo. Responde
+// "esse alvo é plausível?" sem precisar de um gráfico separado.
+async function pintarDensidade(ticker) {
+  const alvo = $("#regua-densidade");
+  limpar(alvo);
+  let pontos = [];
+  try {
+    pontos = await api(`/assets/${ticker}/history?limit=180`);
+  } catch {
+    return; // sem histórico a régua funciona igual; a densidade é contexto
+  }
+  const BINS = 44;
+  const contagem = new Array(BINS).fill(0);
+  for (const ponto of pontos) {
+    const i = Math.floor((pctDaRegua(Number(ponto.close)) / 100) * BINS);
+    if (i >= 0 && i < BINS) contagem[i] += 1;
+  }
+  const pico = Math.max(...contagem, 1);
+  for (const c of contagem) {
+    const barra = el("i");
+    barra.style.height = `${(c / pico) * 100}%`;
+    alvo.append(barra);
+  }
+}
+
+function precoDoLado(p, prefixo) {
+  const tipo = $(`#alvo-${prefixo}-tipo`).value;
+  const numero = Number($(`#alvo-${prefixo}-valor`).value);
+  if (!tipo || !numero) return null;
+  const valor = tipo === "percentual" ? numero / 100 : numero;
+  return contasDoAlvo(p, tipo, valor, prefixo === "gain" ? 1 : -1).limite;
+}
+
+// Escreve um preço de volta nos campos, respeitando o tipo já escolhido --
+// arrastar não pode trocar "preço fixo" por "percentual" pelas costas.
+function escreverPreco(p, prefixo, preco) {
+  const selectTipo = $(`#alvo-${prefixo}-tipo`);
+  const inputValor = $(`#alvo-${prefixo}-valor`);
+  if (!selectTipo.value) {
+    selectTipo.value = "percentual"; // arrastar um lado desligado o liga
+    inputValor.disabled = false;
+  }
+  const medio = Number(p.preco_medio);
+  if (selectTipo.value === "percentual") {
+    const fracao = prefixo === "gain" ? preco / medio - 1 : 1 - preco / medio;
+    inputValor.value = (Math.max(0.001, fracao) * 100).toFixed(1);
+  } else {
+    inputValor.value = preco.toFixed(2);
+  }
+  inputValor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function sincronizarRegua(p) {
+  if (!regua) return;
+  const gain = precoDoLado(p, "gain");
+  const loss = precoDoLado(p, "loss");
+  const atual = Number(p.preco_atual) || Number(p.preco_medio);
+
+  const punhoGain = $("#punho-gain");
+  const punhoLoss = $("#punho-loss");
+  const faixa = $("#regua-faixa");
+
+  for (const [punho, preco, rotulo] of [
+    [punhoGain, gain, "Vender com lucro em"],
+    [punhoLoss, loss, "Sair no prejuízo em"],
+  ]) {
+    punho.hidden = preco === null;
+    if (preco === null) continue;
+    punho.style.left = `${Math.min(Math.max(pctDaRegua(preco), 0), 100)}%`;
+    punho.setAttribute("aria-valuenow", preco.toFixed(2));
+    punho.setAttribute("aria-valuetext", `${rotulo} ${brl.format(preco)}`);
+  }
+
+  // A faixa entre os dois só existe com os dois definidos -- meia faixa não
+  // significaria nada.
+  const temOsDois = gain !== null && loss !== null;
+  faixa.hidden = !temOsDois;
+  if (temOsDois) {
+    const a = Math.min(pctDaRegua(loss), pctDaRegua(gain));
+    const b = Math.max(pctDaRegua(loss), pctDaRegua(gain));
+    faixa.style.left = `${Math.max(a, 0)}%`;
+    faixa.style.width = `${Math.min(b, 100) - Math.max(a, 0)}%`;
+  }
+
+  $("#regua-hoje").style.left = `${Math.min(Math.max(pctDaRegua(atual), 0), 100)}%`;
+  $("#regua-min").textContent = brl.format(regua.min);
+  $("#regua-max").textContent = brl.format(regua.max);
+  $("#regua-hoje-rotulo").textContent = `hoje ${brl.format(atual)}`;
+
+  pintarCenarios(p, gain, loss);
+}
+
+// A frase inteira, não os números soltos: "R$ 1.935,00 (+R$ 252,45)" obriga
+// a pessoa a montar a história na cabeça; a frase já entrega montada.
+//
+// Montada com nós de DOM, nunca com `innerHTML`: `tests/test_frontend.py`
+// proíbe concatenar HTML com dado da API, e com razão -- o ticker e os
+// valores passam por aqui, e "o dado é do próprio banco" só significa que
+// alguém digitou ele em algum momento.
+function frase(partes) {
+  const p = el("p");
+  for (const parte of partes) {
+    p.append(typeof parte === "string" ? document.createTextNode(parte) : parte);
+  }
+  return p;
+}
+
+function pintarCenarios(p, gain, loss) {
+  const medio = Number(p.preco_medio);
+  const conta = (preco) => ({
+    variacao: preco / medio - 1,
+    total: preco * Number(p.quantidade),
+    resultado: preco * Number(p.quantidade) - Number(p.custo_total),
+  });
+
+  const cg = $("#cenario-gain");
+  limpar(cg);
+  cg.hidden = gain === null;
+  if (gain !== null) {
+    const c = conta(gain);
+    cg.append(
+      ...frase([
+        "Se subir para ",
+        el("b", null, brl.format(gain)),
+        ` (${pct(c.variacao)}), você vende os ${num(p.quantidade)} papéis por `,
+        el("b", null, brl.format(c.total)),
+        " e ganha ",
+        el("b", null, brl.format(c.resultado)),
+        ".",
+      ]).childNodes,
+    );
+  }
+
+  const cl = $("#cenario-loss");
+  limpar(cl);
+  cl.hidden = loss === null;
+  if (loss !== null) {
+    const c = conta(loss);
+    cl.append(
+      ...frase([
+        "Se cair para ",
+        el("b", null, brl.format(loss)),
+        ` (${pct(c.variacao)}), você sai com `,
+        el("b", null, brl.format(c.total)),
+        c.resultado < 0 ? " e perde " : " e ganha ",
+        el("b", null, brl.format(Math.abs(c.resultado))),
+        ".",
+      ]).childNodes,
+    );
+  }
+}
+
+function ligarArrasto(p) {
+  const trilho = $("#regua-trilho");
+
+  const mover = (prefixo, clientX) => {
+    const caixa = trilho.getBoundingClientRect();
+    const pctBruto = ((clientX - caixa.left) / caixa.width) * 100;
+    const preco = precoDaRegua(Math.min(Math.max(pctBruto, 0), 100));
+    escreverPreco(p, prefixo, preco);
+  };
+
+  for (const prefixo of ["gain", "loss"]) {
+    const punho = $(`#punho-${prefixo}`);
+    punho.onpointerdown = (ev) => {
+      ev.preventDefault();
+      punho.setPointerCapture(ev.pointerId);
+      const arrastar = (e) => mover(prefixo, e.clientX);
+      punho.onpointermove = arrastar;
+      punho.onpointerup = () => {
+        punho.onpointermove = null;
+        punho.onpointerup = null;
+      };
+    };
+
+    // Teclado: sem isto a régua seria inutilizável para quem não usa mouse,
+    // e o único caminho seria digitar -- justamente o que ela veio evitar.
+    punho.onkeydown = (ev) => {
+      const passo = ev.shiftKey ? 1 : 0.2;
+      const direcao = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[ev.key];
+      if (!direcao) return;
+      ev.preventDefault();
+      const atual = precoDoLado(p, prefixo);
+      if (atual === null) return;
+      escreverPreco(p, prefixo, atual + direcao * (regua.max - regua.min) * (passo / 100));
+    };
+  }
+}
+
 function abrirModalAlvo(p) {
   alvoTickerAtual = p.ticker;
   $("#alvo-ticker").textContent = p.ticker;
@@ -607,6 +848,18 @@ function abrirModalAlvo(p) {
   prepararLadoDoAlvo("loss", p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, p);
   prepararMetaDoAlvo(p);
 
+  // A régua só existe com preço médio: sem ele não há eixo, nem percentual
+  // que signifique alguma coisa.
+  const temEixo = Number(p.preco_medio) > 0;
+  $("#regua-alvo").hidden = !temEixo;
+  if (temEixo) {
+    regua = dominioDaRegua(p, precoDoLado(p, "gain"), precoDoLado(p, "loss"));
+    ligarArrasto(p);
+    sincronizarRegua(p);
+    // Densidade é contexto, não bloqueia a abertura do modal.
+    pintarDensidade(p.ticker).catch(() => {});
+  }
+
   $("#modal-alvo").hidden = false;
 }
 
@@ -615,7 +868,7 @@ function abrirModalAlvo(p) {
 // que se leva para a corretora.
 function prepararMetaDoAlvo(p) {
   const input = $("#alvo-meta-valor");
-  input.value = p.alvo.meta ? num(p.alvo.meta.meta) : "";
+  input.value = p.alvo.meta ? paraCampoNumerico(p.alvo.meta.meta) : "";
 
   const atualizar = () => {
     const dica = $("#alvo-meta-dica");
@@ -641,13 +894,14 @@ function prepararMetaDoAlvo(p) {
 
 function fecharModalAlvo() {
   $("#modal-alvo").hidden = true;
+  regua = null;
   alvoTickerAtual = null;
 }
 
 $("#btn-meta-carteira").addEventListener("click", async () => {
   // `prompt` aqui, e não um modal: é um campo só, e criar uma segunda janela
   // para uma pergunta única seria mais tela do que a decisão merece.
-  const atual = metaDaCarteiraAtual ? num(metaDaCarteiraAtual) : "";
+  const atual = metaDaCarteiraAtual ? paraCampoNumerico(metaDaCarteiraAtual) : "";
   const resposta = prompt("Meta de patrimônio da carteira, em R$ (vazio remove):", atual);
   if (resposta === null) return;
   const valor = resposta.trim() === "" ? null : Number(resposta.replace(",", "."));
@@ -1244,6 +1498,50 @@ function barraDeDistancia(p) {
   );
   barra.append(extremos);
   return barra;
+}
+
+// A faixa só aparece quando há algo a dizer. Um aviso permanente vazio vira
+// ruído, e ruído ensina a ignorar o aviso que importa.
+function renderFaixaDeAlvos(resumo) {
+  const faixa = $("#faixa-alvos");
+  const batidos = resumo.positions.filter(
+    (p) => p.alvo.status === "gain_atingido" || p.alvo.status === "loss_atingido",
+  );
+  faixa.hidden = batidos.length === 0;
+  if (!batidos.length) return;
+
+  const temLoss = batidos.some((p) => p.alvo.status === "loss_atingido");
+  faixa.dataset.temLoss = String(temLoss);
+  limpar(faixa);
+
+  const texto = el("div");
+  const nomes = batidos.map((p) => p.ticker).join(", ");
+  texto.append(
+    el(
+      "strong",
+      null,
+      batidos.length === 1
+        ? `${nomes} chegou no seu alvo`
+        : `${batidos.length} papéis chegaram no alvo`,
+    ),
+  );
+  texto.append(
+    el(
+      "p",
+      null,
+      batidos.length === 1
+        ? `${batidos[0].alvo.status === "gain_atingido" ? "Alvo de lucro" : "Limite de perda"} atingido — a decisão de vender continua sua.`
+        : `${nomes} — a decisão de vender continua sua.`,
+    ),
+  );
+  faixa.append(texto);
+
+  const ir = el("button", "btn btn--fantasma btn--pequeno", "Ver posições");
+  ir.type = "button";
+  ir.addEventListener("click", () =>
+    document.querySelector('.nav-item[data-vista="posicoes"]').click(),
+  );
+  faixa.append(ir);
 }
 
 function renderMetas(resumo) {

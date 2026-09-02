@@ -130,6 +130,45 @@ class TestPosturaDoCliente:
         assert "document.write" not in js
 
 
+class TestCampoNumerico:
+    """Regressao de um bug que TROCAVA o valor salvo pelo usuario.
+
+    `num()` formata em pt-BR: `num(2500)` devolve "2.500". Jogar isso num
+    `<input type="number">` faz o campo ler o ponto de milhar como separador
+    DECIMAL -- o valor vira 2,5. Com "1.234,56" e pior: o campo recusa e fica
+    vazio. Nos dois casos o estrago so aparece ao salvar, com o numero ja
+    trocado, e nada na tela avisa.
+
+    Aconteceu de verdade com a meta de acumulacao: uma meta de R$ 2.500
+    reaberta e salva virava R$ 2,50.
+    """
+
+    def test_nao_preenche_campo_numerico_com_valor_formatado(self) -> None:
+        """Procura `num(` em QUALQUER atribuicao a `.value`.
+
+        A primeira versao deste teste checava a string literal
+        `.value = num(` -- e nao pegou o bug real, que tinha um ternario no
+        meio (`input.value = x ? num(y) : ""`). Casar a linha inteira e o que
+        torna a regra util.
+        """
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+
+        culpadas = [
+            linha.strip()
+            for linha in js.splitlines()
+            if ".value =" in linha and re.search(r"\bnum\(", linha)
+        ]
+        assert not culpadas, (
+            "campo numerico preenchido com `num()` (formatado em pt-BR): "
+            f"{culpadas} -- use `paraCampoNumerico()`, que devolve o numero cru"
+        )
+
+        assert re.search(r"paraCampoNumerico\s*=", js), (
+            "o helper `paraCampoNumerico` sumiu; sem ele nao ha o que usar "
+            "no lugar de `num()` para preencher campo numerico"
+        )
+
+
 class TestAtributoHidden:
     """Regressão de um bug que quebrou o login inteiro.
 
