@@ -245,7 +245,6 @@
     <section class="vista" data-vista="posicoes" hidden>
       <div class="titulo-linha">
         <h1>Posições</h1>
-        <button class="btn btn--fantasma btn--pequeno" id="btn-meta-carteira">Meta da carteira</button>
       </div>
 
       <!-- Mesmo papel do card do Markowitz na Fronteira: a tela mostra o QUE
@@ -263,6 +262,26 @@
         </div>
       </article>
 
+      <!-- ── Área de trade ──
+           Quem está no ponto de vender. Entra sozinho quem bateu ou está perto
+           do alvo; e dá para fixar um papel na mão, para o caso em que a razão
+           de vender é uma que o app não tem como saber. -->
+      <article class="cartao cartao--trade" id="cartao-trade">
+        <div class="cartao-cabeca">
+          <div>
+            <h2>Área de trade</h2>
+            <p class="sub">Quanto vender para tirar o custo e ficar com ações livres</p>
+          </div>
+        </div>
+        <div class="trades" id="trades"></div>
+        <p class="vazio-explicado" id="trade-vazio" hidden></p>
+        <p class="trade-bruto">
+          Contas no <strong>bruto</strong>: sem imposto e sem corretagem. Modelar IR
+          exigiria somar suas vendas do mês, prejuízo acumulado e o tipo de operação —
+          um número fiscal quase certo é pior que nenhum.
+        </p>
+      </article>
+
       <!-- ── Progresso das metas de acumulação ── -->
       <article class="cartao cartao--meta" id="cartao-meta">
         <div class="cartao-cabeca">
@@ -270,10 +289,8 @@
             <h2>Quanto falta para a meta</h2>
             <p class="sub">O quanto já foi acumulado de cada objetivo</p>
           </div>
-          <span class="selo-nao-distribuido" id="nao-distribuido" hidden></span>
         </div>
 
-        <div class="meta-total" id="meta-total" hidden></div>
         <div class="barras" id="barras-meta"></div>
         <p class="vazio-explicado" id="meta-vazia" hidden></p>
       </article>

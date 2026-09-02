@@ -990,3 +990,69 @@ h1, h2, h3, p { margin: 0; }
 .cartao--explica strong { display: block; font-size: 13.5px; margin-bottom: 4px; }
 .cartao--explica p { font-size: 12.5px; color: var(--txt-2); line-height: 1.6; margin: 0; }
 .cartao--explica em { color: var(--txt); font-style: normal; font-weight: 600; }
+
+/* ══ ÁREA DE TRADE ══ */
+
+.cartao--trade { display: grid; gap: 14px; }
+.trades { display: grid; gap: 10px; }
+
+.trade {
+  border: 1px solid var(--borda);
+  border-radius: var(--r-s);
+  background: rgba(255, 255, 255, .02);
+  overflow: hidden;
+}
+.trade[data-motivo="gain_atingido"] { border-color: rgba(52, 211, 153, .32); }
+.trade[data-motivo="loss_atingido"] { border-color: rgba(251, 113, 133, .32); }
+
+.trade-topo {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 12px; padding: 12px 14px; cursor: pointer; width: 100%;
+  text-align: left; font: inherit; color: inherit;
+}
+.trade-topo:hover { background: rgba(255, 255, 255, .03); }
+.trade-ticker { font-weight: 700; font-size: 14px; }
+.trade-motivo {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .03em;
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.trade-motivo[data-motivo="gain_atingido"] { background: rgba(52,211,153,.16); color: var(--verde); }
+.trade-motivo[data-motivo="loss_atingido"] { background: rgba(251,113,133,.16); color: var(--vermelho); }
+.trade-motivo[data-motivo="perto"]         { background: rgba(245,181,74,.14);  color: var(--ouro); }
+.trade-motivo[data-motivo="fixado"]        { background: rgba(123,92,255,.16);  color: var(--violeta-2); }
+
+.trade-resumo { font-size: 12.5px; color: var(--txt-2); font-variant-numeric: tabular-nums; }
+.trade-resumo b { color: var(--txt); }
+.trade-seta { color: var(--txt-3); transition: transform .18s; }
+.trade[data-aberto="true"] .trade-seta { transform: rotate(90deg); }
+
+.trade-corpo {
+  padding: 0 14px 14px; display: grid; gap: 12px;
+  border-top: 1px solid var(--borda);
+}
+
+/* Os dois sentidos da conta, lado a lado: "quanto quero tirar" e "quanto
+   quero guardar" são a mesma decisão vista de dois ângulos. */
+.trade-sentidos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .trade-sentidos { grid-template-columns: 1fr; } }
+
+.trade-sentido { display: grid; gap: 6px; }
+.trade-sentido label { font-size: 11.5px; color: var(--txt-2); font-weight: 600; }
+.trade-sentido input {
+  background: rgba(10, 9, 20, .65); border: 1px solid var(--borda);
+  border-radius: var(--r-s); padding: 9px 11px; outline: none;
+  color: var(--txt); font-size: 13px; width: 100%;
+}
+.trade-sentido input:focus { border-color: var(--violeta); box-shadow: 0 0 0 3px rgba(123,92,255,.2); }
+.trade-saida { font-size: 12px; line-height: 1.55; color: var(--txt-2); min-height: 34px; }
+.trade-saida b { color: var(--txt); font-variant-numeric: tabular-nums; }
+.trade-saida[data-viavel="false"] { color: var(--ouro); }
+
+.trade-acoes { display: flex; gap: 8px; align-items: center; }
+.trade-acoes .btn { padding: 7px 12px; font-size: 12px; }
+
+.trade-bruto {
+  font-size: 11.5px; color: var(--txt-3); line-height: 1.55;
+  border-top: 1px solid var(--borda); padding-top: 12px;
+}
+.trade-bruto strong { color: var(--txt-2); }

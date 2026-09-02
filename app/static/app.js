@@ -532,7 +532,6 @@ function seloDeAlvo(p) {
 }
 
 let alvoTickerAtual = null;
-let metaDaCarteiraAtual = null;
 
 // Cada input de valor guarda um numero "de gente": 15 para 15%, nao 0.15. A
 // API guarda fracao -- a conversao acontece so nas duas bordas (aqui e no
@@ -897,25 +896,6 @@ function fecharModalAlvo() {
   regua = null;
   alvoTickerAtual = null;
 }
-
-$("#btn-meta-carteira").addEventListener("click", async () => {
-  // `prompt` aqui, e não um modal: é um campo só, e criar uma segunda janela
-  // para uma pergunta única seria mais tela do que a decisão merece.
-  const atual = metaDaCarteiraAtual ? paraCampoNumerico(metaDaCarteiraAtual) : "";
-  const resposta = prompt("Meta de patrimônio da carteira, em R$ (vazio remove):", atual);
-  if (resposta === null) return;
-  const valor = resposta.trim() === "" ? null : Number(resposta.replace(",", "."));
-  if (valor !== null && !(valor > 0)) {
-    alert("Informe um valor maior que zero, ou deixe vazio para remover.");
-    return;
-  }
-  try {
-    await api(comCarteira("/portfolio/goal"), { method: "PUT", body: JSON.stringify({ valor }) });
-    await carregarPosicoes();
-  } catch (e) {
-    alert(e.message);
-  }
-});
 
 $("#alvo-fechar").addEventListener("click", fecharModalAlvo);
 // Clicar no fundo escurecido fecha; clicar dentro do cartão, não -- o evento
@@ -1544,47 +1524,238 @@ function renderFaixaDeAlvos(resumo) {
   faixa.append(ir);
 }
 
-function renderMetas(resumo) {
-  const alvoTotal = $("#meta-total");
-  const meta = resumo.meta;
-  metaDaCarteiraAtual = meta.progresso ? meta.progresso.meta : null;
 
-  // Meta da carteira inteira
-  limpar(alvoTotal);
-  alvoTotal.hidden = !meta.progresso;
-  if (meta.progresso) {
-    const g = meta.progresso;
-    const topo = el("div", "meta-total-topo");
-    topo.append(el("span", "meta-total-rotulo", "CARTEIRA INTEIRA"));
-    const numeros = el("span", "meta-total-numeros");
-    numeros.append(el("b", null, brl.format(g.atual)));
-    numeros.append(
+/* ═══ Área de trade ═══
+   Quem está no ponto de vender, e quanto vender para tirar o custo e ficar
+   com ações livres. A conta é bruta (sem IR, sem corretagem) -- o porquê
+   está em `app/services/trade.py`. */
+
+// Quão perto do stop gain um papel precisa estar para entrar sozinho na
+// lista. 5% é curto o bastante para não encher a área de papéis que ainda
+// vão demorar, e largo o bastante para avisar antes de bater.
+const PERTO_DO_ALVO = 0.05;
+
+function motivoNoTrade(p) {
+  if (p.alvo.status === "gain_atingido") return "gain_atingido";
+  if (p.alvo.status === "loss_atingido") return "loss_atingido";
+  if (p.alvo.fixado_no_trade) return "fixado";
+  if (!p.preco_atual || !p.alvo.stop_gain_tipo) return null;
+  const limite = contasDoAlvo(p, p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, 1).limite;
+  const falta = limite / Number(p.preco_atual) - 1;
+  return falta > 0 && falta <= PERTO_DO_ALVO ? "perto" : null;
+}
+
+const ROTULO_MOTIVO = {
+  gain_atingido: "chegou no alvo",
+  loss_atingido: "bateu o limite de perda",
+  perto: "perto do alvo",
+  fixado: "marcado por você",
+};
+
+// A MESMA conta de `app/services/trade.py`, repetida aqui só para responder
+// enquanto a pessoa digita. O backend continua sendo a autoridade: é dele o
+// plano padrão que a linha mostra fechada, e é ele que tem teste.
+function planoDeTrade(p, lucroDesejado) {
+  const q = Number(p.quantidade);
+  const preco = Number(p.preco_atual);
+  const custo = Number(p.custo_total);
+  if (!q || !preco) return null;
+
+  const vender = Math.ceil((custo + lucroDesejado) / preco);
+  const viavel = vender <= q;
+  const recebe = vender * preco;
+  return {
+    vender,
+    viavel,
+    recebe,
+    residuo: viavel ? q - vender : 0,
+    residuoValor: viavel ? (q - vender) * preco : 0,
+    sobra: Math.max(0, recebe - custo),
+    faltam: viavel ? 0 : vender - q,
+  };
+}
+
+function precoParaResiduo(p, residuoDesejado) {
+  const q = Number(p.quantidade);
+  const vendaveis = q - residuoDesejado;
+  if (vendaveis <= 0) return null;
+  // Sobe para o centavo seguinte, igual ao `ROUND_CEILING` do backend: um
+  // preço que "quase" cobre o custo não cobre, e arredondar para o mais
+  // próximo devolvia um preço em que sobra uma ação a menos que a pedida.
+  return Math.ceil((Number(p.custo_total) / vendaveis) * 100) / 100;
+}
+
+function linhaDeTrade(p, motivo) {
+  const linha = el("div", "trade");
+  linha.dataset.motivo = motivo;
+  linha.dataset.aberto = "false";
+
+  const topo = el("button", "trade-topo");
+  topo.type = "button";
+  topo.append(el("span", "trade-ticker", p.ticker));
+
+  const meio = el("div");
+  const selo = el("span", "trade-motivo", ROTULO_MOTIVO[motivo]);
+  selo.dataset.motivo = motivo;
+  meio.append(selo);
+  const plano = p.alvo.trade;
+  const resumo = el("div", "trade-resumo");
+  if (plano && plano.viavel) {
+    resumo.append(
+      document.createTextNode("venda "),
+      el("b", null, `${plano.vender} de ${num(p.quantidade)}`),
+      document.createTextNode(" e ficam "),
+      el("b", null, `${plano.residuo} ${plano.residuo === 1 ? "ação livre" : "ações livres"}`),
+    );
+  } else if (plano) {
+    resumo.append(document.createTextNode("o preço ainda não cobre o custo da posição"));
+  }
+  meio.append(resumo);
+  topo.append(meio);
+  topo.append(el("span", "trade-seta", "›"));
+
+  const corpo = el("div", "trade-corpo");
+  corpo.hidden = true;
+  topo.addEventListener("click", () => {
+    const aberto = linha.dataset.aberto === "true";
+    linha.dataset.aberto = String(!aberto);
+    corpo.hidden = aberto;
+  });
+
+  // ── Os dois sentidos da mesma conta ──
+  const sentidos = el("div", "trade-sentidos");
+
+  const ida = el("div", "trade-sentido");
+  ida.append(el("label", null, "Quero tirar em dinheiro (além do custo)"));
+  const campoLucro = el("input");
+  campoLucro.type = "number";
+  campoLucro.min = "0";
+  campoLucro.step = "any";
+  campoLucro.placeholder = "0 = só recuperar o custo";
+  ida.append(campoLucro);
+  const saidaIda = el("p", "trade-saida");
+  ida.append(saidaIda);
+  sentidos.append(ida);
+
+  const volta = el("div", "trade-sentido");
+  volta.append(el("label", null, "Quero ficar com quantas ações livres"));
+  const campoResiduo = el("input");
+  campoResiduo.type = "number";
+  campoResiduo.min = "0";
+  campoResiduo.step = "1";
+  campoResiduo.placeholder = "ex: 10";
+  volta.append(campoResiduo);
+  const saidaVolta = el("p", "trade-saida");
+  volta.append(saidaVolta);
+  sentidos.append(volta);
+
+  const recalcularIda = () => {
+    limpar(saidaIda);
+    const r = planoDeTrade(p, Number(campoLucro.value) || 0);
+    if (!r) return;
+    saidaIda.dataset.viavel = String(r.viavel);
+    if (r.viavel) {
+      saidaIda.append(
+        document.createTextNode("Venda "),
+        el("b", null, `${r.vender} ${r.vender === 1 ? "ação" : "ações"}`),
+        document.createTextNode(` por ${brl.format(r.recebe)}. Sobram `),
+        el("b", null, `${r.residuo} livres`),
+        document.createTextNode(` (${brl.format(r.residuoValor)})`),
+        document.createTextNode(r.sobra > 0 ? ` e ${brl.format(r.sobra)} em caixa.` : "."),
+      );
+    } else {
+      saidaIda.append(
+        document.createTextNode("Ainda não dá: precisaria vender "),
+        el("b", null, `${r.vender} de ${num(p.quantidade)}`),
+        document.createTextNode(` — faltam ${r.faltam}.`),
+      );
+    }
+  };
+
+  const recalcularVolta = () => {
+    limpar(saidaVolta);
+    const n = Number(campoResiduo.value);
+    if (!n) return;
+    const alvo = precoParaResiduo(p, n);
+    if (alvo === null) {
+      saidaVolta.dataset.viavel = "false";
+      saidaVolta.append(
+        document.createTextNode(`Guardando as ${num(p.quantidade)}, não sobra nada para vender.`),
+      );
+      return;
+    }
+    const atual = Number(p.preco_atual);
+    const falta = alvo / atual - 1;
+    saidaVolta.dataset.viavel = String(falta <= 0);
+    saidaVolta.append(
+      document.createTextNode("O preço precisa chegar a "),
+      el("b", null, brl.format(alvo)),
       document.createTextNode(
-        g.atingida ? ` de ${brl.format(g.meta)} · meta batida` : ` de ${brl.format(g.meta)} · faltam ${brl.format(g.falta)}`,
+        falta > 0
+          ? ` — hoje está em ${brl.format(atual)}, faltam ${proporcao(falta)}.`
+          : ` — o preço de hoje (${brl.format(atual)}) já passa disso.`,
       ),
     );
-    topo.append(numeros);
-    alvoTotal.append(topo);
+  };
 
-    const trilho = el("div", "barra-trilho");
-    const cheio = el("div", "barra-preenchida");
-    cheio.dataset.atingida = String(g.atingida);
-    cheio.style.width = "0%";
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        cheio.style.width = `${Math.min(Number(g.progresso), 1) * 100}%`;
-      }),
-    );
-    trilho.append(cheio);
-    alvoTotal.append(trilho);
-  }
+  campoLucro.oninput = recalcularIda;
+  campoResiduo.oninput = recalcularVolta;
+  recalcularIda();
+  corpo.append(sentidos);
 
-  // "Ainda sem destino": a diferença entre a meta geral e a soma das metas
-  // por papel. É o número que justifica ter as duas coisas.
-  const selo = $("#nao-distribuido");
-  const sobra = meta.nao_distribuido === null ? null : Number(meta.nao_distribuido);
-  mostrarSe(selo, sobra !== null && sobra > 0 ? `${brl.format(sobra)} ainda sem destino` : "");
+  // ── Fixar / soltar ──
+  const acoes = el("div", "trade-acoes");
+  const fixar = el("button", "btn btn--fantasma btn--pequeno");
+  fixar.type = "button";
+  fixar.textContent = p.alvo.fixado_no_trade ? "Tirar da área de trade" : "Fixar aqui";
+  fixar.addEventListener("click", async () => {
+    fixar.disabled = true;
+    try {
+      await api(comCarteira(`/portfolio/trade/${p.ticker}`), {
+        method: "PUT",
+        body: JSON.stringify({ fixado: !p.alvo.fixado_no_trade }),
+      });
+      await carregarPosicoes();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      fixar.disabled = false;
+    }
+  });
+  acoes.append(fixar);
 
+  const editarAlvo = el("button", "btn btn--fantasma btn--pequeno", "Ajustar alvo");
+  editarAlvo.type = "button";
+  editarAlvo.addEventListener("click", () => abrirModalAlvo(p));
+  acoes.append(editarAlvo);
+  corpo.append(acoes);
+
+  linha.append(topo, corpo);
+  return linha;
+}
+
+function renderTrades(resumo) {
+  const lista = $("#trades");
+  limpar(lista);
+
+  const candidatos = resumo.positions
+    .map((p) => [p, motivoNoTrade(p)])
+    .filter(([, motivo]) => motivo !== null);
+
+  // Quem bateu vem primeiro: é sobre isso que há uma decisão pendente hoje.
+  const ordem = { gain_atingido: 0, loss_atingido: 1, perto: 2, fixado: 3 };
+  candidatos.sort((a, b) => ordem[a[1]] - ordem[b[1]]);
+  candidatos.forEach(([p, motivo]) => lista.append(linhaDeTrade(p, motivo)));
+
+  mostrarSe(
+    $("#trade-vazio"),
+    candidatos.length
+      ? ""
+      : "Nenhum papel no ponto de vender. Assim que um chegar perto do alvo de lucro ele aparece aqui — ou fixe um na mão pelo selo de alvo na tabela.",
+  );
+}
+
+function renderMetas(resumo) {
   // Barras por papel
   const lista = $("#barras-meta");
   limpar(lista);
@@ -1594,7 +1765,7 @@ function renderMetas(resumo) {
 
   mostrarSe(
     $("#meta-vazia"),
-    comMeta.length || meta.progresso
+    comMeta.length
       ? ""
       : "Nenhuma meta definida ainda. Clique no alvo de um papel na tabela abaixo para dizer quanto quer ter dele.",
   );
@@ -1611,7 +1782,7 @@ function renderMetas(resumo) {
     $("#distancia-vazia"),
     barras.length ? "" : "Nenhum stop gain ou stop loss definido ainda.",
   );
-  $("#cartao-distancia").hidden = barras.length === 0 && comMeta.length === 0;
+  $("#cartao-distancia").hidden = barras.length === 0;
 }
 
 async function carregarPosicoes() {
@@ -1622,6 +1793,7 @@ async function carregarPosicoes() {
   ]);
 
   renderMetas(resumo);
+  renderTrades(resumo);
 
   const corpo = $("#tabela-posicoes tbody");
   limpar(corpo);
