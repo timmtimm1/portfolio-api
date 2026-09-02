@@ -62,7 +62,7 @@ class TimestampMixin:
     )
 
 
-def coluna_enum[E: enum_py.Enum](tipo: type[E], *, length: int) -> Enum:
+def coluna_enum[E: enum_py.Enum](tipo: type[E], *, length: int, name: str | None = None) -> Enum:
     """Tipo de coluna para enums, com duas correcoes em relacao ao padrao.
 
     **`values_callable`** faz o banco guardar o VALOR do membro ("compra"), nao o
@@ -79,6 +79,13 @@ def coluna_enum[E: enum_py.Enum](tipo: type[E], *, length: int) -> Enum:
     na aplicacao, que e justamente o que a Etapa 6 argumentou nao bastar: dado
     invalido que entra por um script ou por um UPDATE manual e dado invalido
     para sempre.
+
+    **`name`** so precisa ser passado quando o MESMO enum e reaproveitado em
+    DUAS colunas da MESMA tabela (como `stop_gain_tipo`/`stop_loss_tipo` em
+    `AssetTarget`, os dois usando `TipoAlvo`). Sem ele, o SQLAlchemy nomeia o
+    CHECK constraint a partir do enum (`ck_<tabela>_<nomedoenum>`), e as duas
+    colunas colidiriam no mesmo nome -- o `CREATE TABLE` falha com "constraint
+    ja existe" antes mesmo de a migration chegar ao banco em producao.
     """
     return Enum(
         tipo,
@@ -87,4 +94,5 @@ def coluna_enum[E: enum_py.Enum](tipo: type[E], *, length: int) -> Enum:
         validate_strings=True,
         values_callable=lambda e: [m.value for m in e],
         create_constraint=True,
+        name=name,
     )
