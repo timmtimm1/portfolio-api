@@ -5,7 +5,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.factories import criar_ativo, op, segunda_conta, usuario_logado
+from tests.factories import criar_ativo, criar_historico, op, segunda_conta, usuario_logado
 
 
 class TestIsolamentoEntreUsuarios:
@@ -305,3 +305,157 @@ class TestListagem:
     async def test_paginacao_tem_teto(self, client: AsyncClient) -> None:
         _, h = await usuario_logado(client)
         assert (await client.get("/transactions?limit=1000000", headers=h)).status_code == 422
+
+
+class TestZerarTudo:
+    """`DELETE /transactions` -- zera o livro inteiro de uma vez.
+
+    Existe porque a remocao unitaria recusa apagar uma compra que sustenta uma
+    venda posterior (`TestRemocao.test_remover_compra_que_sustenta_uma_venda...`).
+    Numa carteira com meses de historico, isso obriga a apagar de tras para
+    frente, uma linha por vez -- inviavel para quem so quer recomecar a
+    simulacao. A REAL fica de fora por um motivo diferente: la a transacao E o
+    registro, nao um estado que se reseta.
+    """
+
+    async def test_zera_uma_carteira_simulada_mesmo_com_venda_dependente(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O caso que a remocao unitaria nao resolve: uma compra com venda
+        posterior. Aqui as duas saem juntas, sem 409."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        sim = (
+            await client.post("/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h)
+        ).json()
+
+        await client.post(f"/transactions?portfolio_id={sim['id']}", json=op(), headers=h)
+        await client.post(
+            f"/transactions?portfolio_id={sim['id']}",
+            json=op(side="venda", price="30", traded_at="2026-02-10"),
+            headers=h,
+        )
+
+        resp = await client.delete(f"/transactions?portfolio_id={sim['id']}", headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["removidas"] == 2
+
+        restante = await client.get(f"/transactions?portfolio_id={sim['id']}", headers=h)
+        assert restante.json()["total"] == 0
+
+    async def test_a_carteira_real_e_recusada(self, client: AsyncClient, db: AsyncSession) -> None:
+        """A trava mais importante do endpoint: nao existe 'zerar' a carteira
+        real. Ledger-as-truth significa que a transacao E o dado."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(), headers=h)  # vai para a REAL
+
+        resp = await client.delete("/transactions", headers=h)
+
+        assert resp.status_code == 409
+        assert (await client.get("/transactions", headers=h)).json()["total"] == 1
+
+    async def test_carteira_ja_vazia_devolve_zero(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        _, h = await usuario_logado(client)
+        sim = (
+            await client.post("/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h)
+        ).json()
+
+        resp = await client.delete(f"/transactions?portfolio_id={sim['id']}", headers=h)
+
+        assert resp.status_code == 200
+        assert resp.json()["removidas"] == 0
+
+    async def test_nao_zera_carteira_alheia(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        dono, h_dono = await usuario_logado(client)
+        h_outro = await segunda_conta(client)
+        sim = (
+            await client.post(
+                "/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h_dono
+            )
+        ).json()
+        await client.post(f"/transactions?portfolio_id={sim['id']}", json=op(), headers=h_dono)
+
+        resp = await client.delete(f"/transactions?portfolio_id={sim['id']}", headers=h_outro)
+
+        # 404, nao 403: `get_carteira` nao acha a carteira de outro usuario --
+        # o mesmo portao unico que protege toda leitura e escrita.
+        assert resp.status_code == 404
+        assert (await client.get(f"/transactions?portfolio_id={sim['id']}", headers=h_dono)).json()[
+            "total"
+        ] == 1
+
+    async def test_apaga_o_historico_de_snapshots_junto(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Sem transacao nenhuma, nao ha posicao nem valor a fotografar --
+        manter snapshots antigos contaria a historia de uma carteira que nao
+        existe mais."""
+        from sqlalchemy import select
+
+        from app.models.snapshot import PortfolioSnapshot
+
+        ativo = await criar_ativo(db, ticker="PETR4")
+        # `backfill` so produz ponto onde ha fechamento em `price_history` -- sem
+        # isto, a compra ficaria sem snapshot algum e o teste nao provaria nada.
+        await criar_historico(db, ativo, dias=250)
+        _, h = await usuario_logado(client)
+        sim = (
+            await client.post("/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h)
+        ).json()
+        await client.post(f"/transactions?portfolio_id={sim['id']}", json=op(), headers=h)
+
+        # A propria criacao ja reconstroi o historico a partir da data da compra.
+        antes = (
+            (
+                await db.execute(
+                    select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == sim["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert antes  # sanity: havia snapshot para apagar
+
+        await client.delete(f"/transactions?portfolio_id={sim['id']}", headers=h)
+
+        depois = (
+            (
+                await db.execute(
+                    select(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == sim["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert depois == []
+
+    async def test_permite_simular_de_novo_depois_de_zerar(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O motivo de a funcionalidade existir: apagar tudo e lancar operacoes
+        novas em seguida, sem nenhum resquicio da simulacao anterior."""
+        await criar_ativo(db, ticker="PETR4")
+        await criar_ativo(db, ticker="VALE3")
+        _, h = await usuario_logado(client)
+        sim = (
+            await client.post("/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h)
+        ).json()
+        await client.post(f"/transactions?portfolio_id={sim['id']}", json=op(), headers=h)
+
+        await client.delete(f"/transactions?portfolio_id={sim['id']}", headers=h)
+        nova = await client.post(
+            f"/transactions?portfolio_id={sim['id']}",
+            json=op(ticker="VALE3", quantity="50", price="70.00"),
+            headers=h,
+        )
+
+        assert nova.status_code == 201
+        posicoes = await client.get(f"/portfolio/positions?portfolio_id={sim['id']}", headers=h)
+        assert [p["ticker"] for p in posicoes.json()] == ["VALE3"]
+
+    async def test_todas_as_rotas_exigem_autenticacao(self, client: AsyncClient) -> None:
+        assert (await client.delete("/transactions")).status_code == 401
