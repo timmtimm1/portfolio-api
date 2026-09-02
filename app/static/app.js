@@ -500,6 +500,19 @@ function seloDeAlvo(p) {
   selo.type = "button";
   selo.dataset.status = p.alvo.status;
   selo.textContent = ROTULO_STATUS_ALVO[p.alvo.status] ?? resumoDoAlvo(p.alvo);
+
+  // As contas completas no `title`: quem está só passando os olhos pela
+  // tabela vê os valores sem precisar abrir o modal -- mesmo recurso que
+  // `marcaDeEvento` usa para explicar um desdobramento.
+  const linhas = [];
+  if (p.alvo.stop_gain_tipo) {
+    linhas.push(`Stop gain: ${textoDoAlvo(p, p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, 1)}`);
+  }
+  if (p.alvo.stop_loss_tipo) {
+    linhas.push(`Stop loss: ${textoDoAlvo(p, p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, -1)}`);
+  }
+  selo.title = linhas.length ? linhas.join("\n") : "Definir um stop gain ou stop loss";
+
   selo.addEventListener("click", () => abrirModalAlvo(p));
   return selo;
 }
@@ -509,7 +522,47 @@ let alvoTickerAtual = null;
 // Cada input de valor guarda um numero "de gente": 15 para 15%, nao 0.15. A
 // API guarda fracao -- a conversao acontece so nas duas bordas (aqui e no
 // envio), pra tela nunca mostrar "0,15%" quando o usuario quis dizer 15%.
-function prepararLadoDoAlvo(prefixo, tipo, valor, precoMedio) {
+// Traduz um alvo nos três números que importam para decidir.
+//
+// `valor` chega SEMPRE na convenção da API: fração para percentual (0,15) e
+// preço absoluto para preço fixo. Quem tem um número "de gente" (15) converte
+// antes de chamar -- misturar as duas unidades aqui seria o tipo de erro que
+// só aparece como um alvo 100x errado na tela.
+function contasDoAlvo(posicao, tipo, valor, sinal) {
+  const precoMedio = Number(posicao.preco_medio);
+  const exato = tipo === "percentual" ? precoMedio * (1 + sinal * Number(valor)) : Number(valor);
+
+  // Arredonda para centavos ANTES de multiplicar pela quantidade. 15% sobre
+  // R$ 37,39 dá R$ 42,9985 -- um preço que não existe na B3, que negocia em
+  // centavos. Mostrar "R$ 43,00 por ação" e um total calculado sobre 42,9985
+  // faria a tela exibir R$ 1.934,93 onde qualquer um multiplicando na cabeça
+  // acha R$ 1.935,00, e os sete centavos de diferença pareceriam um bug.
+  //
+  // O backend continua comparando o preço com o limite EXATO -- lá a conta
+  // decide se o alvo bateu, e arredondar mudaria o resultado numa faixa de
+  // um centavo. Aqui é exibição.
+  const limite = Math.round(exato * 100) / 100;
+  const total = limite * Number(posicao.quantidade);
+  return { limite, total, resultado: total - Number(posicao.custo_total) };
+}
+
+// "R$ 43,00 por ação · R$ 1.935,00 no total (+R$ 252,45)"
+//
+// O primeiro item é sempre o que a pessoa NÃO digitou: quem escolheu
+// percentual quer saber o preço, quem escolheu preço fixo quer saber o
+// percentual. Os outros dois -- quanto a posição inteira vale no alvo, e
+// quanto isso dá de lucro ou prejuízo -- são o que nenhum dos dois modos
+// mostrava, e é a conta que de fato decide se o alvo faz sentido.
+function textoDoAlvo(posicao, tipo, valor, sinal) {
+  const { limite, total, resultado } = contasDoAlvo(posicao, tipo, valor, sinal);
+  const precoMedio = Number(posicao.preco_medio);
+  const equivalente =
+    tipo === "percentual" ? `${brl.format(limite)} por ação` : pct(limite / precoMedio - 1);
+  const sinalDoResultado = resultado >= 0 ? "+" : "";
+  return `${equivalente} · ${brl.format(total)} no total (${sinalDoResultado}${brl.format(resultado)})`;
+}
+
+function prepararLadoDoAlvo(prefixo, tipo, valor, posicao) {
   const selectTipo = $(`#alvo-${prefixo}-tipo`);
   const inputValor = $(`#alvo-${prefixo}-valor`);
   const dica = $(`#alvo-${prefixo}-dica`);
@@ -518,30 +571,28 @@ function prepararLadoDoAlvo(prefixo, tipo, valor, precoMedio) {
   inputValor.disabled = !tipo;
   inputValor.value = tipo === "percentual" ? num(Number(valor) * 100) : tipo === "preco" ? num(valor) : "";
 
-  atualizarDicaDoAlvo(prefixo, precoMedio, prefixo === "gain" ? 1 : -1);
+  const atualizar = () => atualizarDicaDoAlvo(prefixo, posicao, prefixo === "gain" ? 1 : -1);
+  atualizar();
   selectTipo.onchange = () => {
     inputValor.disabled = !selectTipo.value;
     inputValor.value = "";
     dica.hidden = true;
   };
-  inputValor.oninput = () => atualizarDicaDoAlvo(prefixo, precoMedio, prefixo === "gain" ? 1 : -1);
+  inputValor.oninput = atualizar;
 }
 
-// Só existe para tipo=percentual: mostra a que preço em reais aquilo
-// corresponde HOJE, porque "15% acima do médio" não é um número que a
-// cabeça converte de cabeça na hora de decidir.
-function atualizarDicaDoAlvo(prefixo, precoMedio, sinal) {
-  const selectTipo = $(`#alvo-${prefixo}-tipo`);
-  const inputValor = $(`#alvo-${prefixo}-valor`);
+function atualizarDicaDoAlvo(prefixo, posicao, sinal) {
+  const tipo = $(`#alvo-${prefixo}-tipo`).value;
+  const numero = Number($(`#alvo-${prefixo}-valor`).value);
   const dica = $(`#alvo-${prefixo}-dica`);
 
-  const numero = Number(inputValor.value);
-  if (selectTipo.value !== "percentual" || !numero || !precoMedio) {
+  if (!tipo || !numero || !Number(posicao.preco_medio)) {
     dica.hidden = true;
     return;
   }
-  const limite = precoMedio * (1 + (sinal * numero) / 100);
-  dica.textContent = `= ${brl.format(limite)}, sobre o preço médio de ${brl.format(precoMedio)}`;
+  // O input guarda "15" para 15%; as contas trabalham na fração da API.
+  const valor = tipo === "percentual" ? numero / 100 : numero;
+  dica.textContent = textoDoAlvo(posicao, tipo, valor, sinal);
   dica.hidden = false;
 }
 
@@ -551,8 +602,8 @@ function abrirModalAlvo(p) {
   $("#alvo-erro").hidden = true;
   $("#alvo-remover").hidden = p.alvo.status === "sem_alvo";
 
-  prepararLadoDoAlvo("gain", p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, p.preco_medio);
-  prepararLadoDoAlvo("loss", p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, p.preco_medio);
+  prepararLadoDoAlvo("gain", p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, p);
+  prepararLadoDoAlvo("loss", p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, p);
 
   $("#modal-alvo").hidden = false;
 }
