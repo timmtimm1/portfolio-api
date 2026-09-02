@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import AssetType
-from tests.factories import criar_ativo, criar_historico, usuario_logado
+from tests.conftest import ProvedorFake
+from tests.factories import criar_ativo, criar_historico, op, usuario_logado
 
 
 class TestProtecao:
@@ -178,3 +181,82 @@ class TestDetalheEHistorico:
 
         ponto = (await client.get("/assets/PETR4/history", headers=headers)).json()[0]
         assert ponto["close"] == "40.100000"
+
+
+class TestCotacao:
+    """`GET /assets/{ticker}/quote` -- pre-preenche o preco de uma operacao nova.
+
+    Passa pelo mesmo `quote_service` usado no resumo da carteira: o cache aqui
+    e o mesmo cache de la, e o mesmo teste de `test_quotes.py` que prova que a
+    segunda chamada nao toca o fornecedor vale tambem para esta rota.
+    """
+
+    async def test_devolve_a_cotacao_do_fornecedor(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, headers = await usuario_logado(client)
+        provedor.precos = {"PETR4": "37.45"}
+
+        resp = await client.get("/assets/PETR4/quote", headers=headers)
+
+        assert resp.status_code == 200
+        corpo = resp.json()
+        assert corpo["preco"] == "37.45"
+        assert corpo["fonte"] == "fake"
+
+    async def test_ticker_em_minusculas_funciona(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, headers = await usuario_logado(client)
+        provedor.precos = {"PETR4": "37.45"}
+
+        resp = await client.get("/assets/petr4/quote", headers=headers)
+        assert resp.status_code == 200
+
+    async def test_ativo_fora_do_catalogo_devolve_404(self, client: AsyncClient) -> None:
+        _, headers = await usuario_logado(client)
+        assert (await client.get("/assets/XXXX9/quote", headers=headers)).status_code == 404
+
+    async def test_sem_cotacao_do_fornecedor_devolve_404(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """Ativo existe no catalogo, mas nenhum fornecedor devolveu preco --
+        mesma consequencia pratica para quem preenche o formulario: sem
+        sugestao, digite o seu."""
+        await criar_ativo(db, ticker="PETR4")
+        _, headers = await usuario_logado(client)
+        provedor.falha = True
+
+        resp = await client.get("/assets/PETR4/quote", headers=headers)
+
+        assert resp.status_code == 404
+        assert "PETR4" in resp.json()["detail"]
+
+    async def test_reusa_o_cache_do_resto_do_app(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """A cotacao usada aqui e a MESMA do resumo da carteira -- pedir o
+        preco para pre-preencher o formulario nao pode custar uma segunda
+        chamada ao fornecedor."""
+        await criar_ativo(db, ticker="PETR4")
+        _, headers = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=headers)
+        provedor.precos = {"PETR4": "25.00"}
+
+        await client.get("/portfolio/summary", headers=headers)
+        provedor.chamadas.clear()
+
+        resp = await client.get("/assets/PETR4/quote", headers=headers)
+
+        assert resp.status_code == 200
+        # Decimal, nao string exata: um HIT de cache devolve o valor com a
+        # precisao da coluna NUMERIC(18,6) da tabela de cache (25.000000), nao
+        # a precisao original do fornecedor (25.00) -- o mesmo numero, duas
+        # representacoes.
+        assert Decimal(resp.json()["preco"]) == Decimal("25.00")
+        assert provedor.chamadas == []
+
+    async def test_exige_autenticacao(self, client: AsyncClient) -> None:
+        assert (await client.get("/assets/PETR4/quote")).status_code == 401
