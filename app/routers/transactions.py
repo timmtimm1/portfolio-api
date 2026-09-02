@@ -22,7 +22,12 @@ from app.schemas.dividend import (
     DividendSyncResult,
 )
 from app.schemas.portfolio import PortfolioSummary
-from app.schemas.transaction import PositionRead, TransactionCreate, TransactionRead
+from app.schemas.transaction import (
+    PositionRead,
+    TransactionCreate,
+    TransactionRead,
+    TransactionsClearedResult,
+)
 from app.services import (
     asset_service,
     dividend,
@@ -33,7 +38,7 @@ from app.services import (
     transaction_service,
 )
 from app.services.position import VendaSemPosicaoError
-from app.services.transaction_service import AtivoNaoEncontradoError
+from app.services.transaction_service import AtivoNaoEncontradoError, CarteiraRealNaoZeravelError
 
 router = APIRouter(tags=["carteira"])
 
@@ -115,6 +120,29 @@ async def obter_transacao(
     if transacao is None:
         raise _NAO_ENCONTRADA
     return TransactionRead.model_validate(transacao)
+
+
+@router.delete(
+    "/transactions",
+    response_model=TransactionsClearedResult,
+    summary="Zera o livro inteiro da carteira simulada, de uma vez",
+)
+async def zerar_transacoes(carteira: CarteiraAtual, db: DbDep) -> TransactionsClearedResult:
+    """Apaga TODAS as operacoes da carteira ativa num unico passo.
+
+    Existe porque `DELETE /transactions/{id}` so tira uma por vez -- e recusa
+    apagar uma compra antiga se uma venda posterior ainda depende dela (409).
+    Numa carteira com meses de historico, isso obriga a apagar de tras para
+    frente, uma linha por vez. Para recomecar do zero, nao e uma opcao pratica.
+
+    409 na carteira REAL, pelo mesmo motivo por tras de nao poder apaga-la
+    inteira: a transacao E o registro, nao um estado que se reseta.
+    """
+    try:
+        removidas = await transaction_service.remover_todas(db, carteira)
+    except CarteiraRealNaoZeravelError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    return TransactionsClearedResult(removidas=removidas)
 
 
 @router.delete(
