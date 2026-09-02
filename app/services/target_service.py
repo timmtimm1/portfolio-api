@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.asset import Asset
 from app.models.portfolio import Portfolio
 from app.models.target import AssetTarget, TipoAlvo
-from app.schemas.target import AlvoResumo
+from app.schemas.target import AlvoResumo, MetaDaCarteira, MetaResumo
 from app.services import target
 
 
@@ -31,6 +31,7 @@ async def definir(
     stop_gain_valor: Decimal | None,
     stop_loss_tipo: TipoAlvo | None,
     stop_loss_valor: Decimal | None,
+    meta_valor: Decimal | None,
 ) -> AssetTarget:
     """Upsert do alvo inteiro, de uma vez.
 
@@ -48,6 +49,7 @@ async def definir(
         stop_gain_valor=stop_gain_valor,
         stop_loss_tipo=stop_loss_tipo,
         stop_loss_valor=stop_loss_valor,
+        meta_valor=meta_valor,
     )
     # `RETURNING` poupa o SELECT extra que um `db.get()` depois do upsert
     # exigiria -- e devolve o tipo certo (`AssetTarget`, nao `AssetTarget | None`)
@@ -66,6 +68,7 @@ async def definir(
                     "stop_gain_valor": stmt.excluded.stop_gain_valor,
                     "stop_loss_tipo": stmt.excluded.stop_loss_tipo,
                     "stop_loss_valor": stmt.excluded.stop_loss_valor,
+                    "meta_valor": stmt.excluded.meta_valor,
                 },
             ).returning(AssetTarget)
         )
@@ -110,7 +113,11 @@ async def dos_ativos(db: AsyncSession, portfolio_id: uuid.UUID) -> dict[str, Ass
 
 
 def resumo_de(
-    alvo: AssetTarget | None, *, preco_medio: Decimal, preco_atual: Decimal | None
+    alvo: AssetTarget | None,
+    *,
+    preco_medio: Decimal,
+    preco_atual: Decimal | None,
+    valor_atual: Decimal = Decimal(0),
 ) -> AlvoResumo:
     """Traduz o model (ou a ausencia dele) para o schema exposto pela API.
 
@@ -121,10 +128,43 @@ def resumo_de(
     status = target.avaliar(alvo, preco_medio=preco_medio, preco_atual=preco_atual)
     if alvo is None:
         return AlvoResumo(status=status)
+
+    progresso = target.progresso_da_meta(valor_atual, alvo.meta_valor)
     return AlvoResumo(
         stop_gain_tipo=alvo.stop_gain_tipo,
         stop_gain_valor=alvo.stop_gain_valor,
         stop_loss_tipo=alvo.stop_loss_tipo,
         stop_loss_valor=alvo.stop_loss_valor,
         status=status,
+        meta=_meta_resumo(progresso),
+    )
+
+
+def _meta_resumo(progresso: target.ProgressoDaMeta | None) -> MetaResumo | None:
+    if progresso is None:
+        return None
+    return MetaResumo(
+        meta=progresso.meta,
+        atual=progresso.atual,
+        falta=progresso.falta,
+        progresso=progresso.progresso,
+        atingida=progresso.atingida,
+    )
+
+
+def da_carteira(
+    carteira: Portfolio, *, valor_mercado: Decimal, alvos: dict[str, AssetTarget]
+) -> MetaDaCarteira:
+    """Consolida a meta da carteira inteira.
+
+    `soma_das_metas` percorre os alvos, nao as posicoes: uma meta definida
+    para um papel que ainda nao foi comprado continua sendo dinheiro
+    planejado, e some da conta se so olhassemos o que ja esta na carteira.
+    """
+    soma = sum((a.meta_valor for a in alvos.values() if a.meta_valor is not None), Decimal(0))
+    progresso = target.progresso_da_meta(valor_mercado, carteira.meta_valor)
+    return MetaDaCarteira(
+        progresso=_meta_resumo(progresso),
+        soma_das_metas=soma,
+        nao_distribuido=carteira.meta_valor - soma if carteira.meta_valor is not None else None,
     )

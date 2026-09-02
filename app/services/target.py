@@ -14,6 +14,8 @@ from typing import Protocol
 
 from app.models.target import TipoAlvo
 
+ZERO = Decimal(0)
+
 
 class StatusAlvo(enum.StrEnum):
     """O que mostrar na tela para esta posicao."""
@@ -104,3 +106,40 @@ def avaliar(
             return StatusAlvo.LOSS_ATINGIDO
 
     return StatusAlvo.DENTRO
+
+
+@dataclass(frozen=True)
+class ProgressoDaMeta:
+    """Onde a posicao (ou a carteira) esta em relacao a meta de acumulacao."""
+
+    meta: Decimal
+    atual: Decimal
+    falta: Decimal
+    progresso: Decimal
+    """Fracao do caminho andado. 0,62 = 62%. Pode passar de 1 -- quem ja
+    superou a meta nao deve ver a barra travada em 100% como se ainda
+    estivesse chegando la."""
+
+    @property
+    def atingida(self) -> bool:
+        return self.atual >= self.meta
+
+
+def progresso_da_meta(atual: Decimal, meta: Decimal | None) -> ProgressoDaMeta | None:
+    """Quanto falta para chegar na meta, em reais e em fracao.
+
+    `None` quando nao ha meta definida -- o chamador nao precisa inventar um
+    valor neutro nem a tela precisa desenhar uma barra vazia sem sentido.
+
+    `falta` nunca fica negativo: quem passou da meta nao tem "menos R$ 300
+    faltando", tem zero. O quanto passou continua legivel em `progresso`,
+    que nao e limitado a 1.
+    """
+    if meta is None or meta <= ZERO:
+        return None
+    return ProgressoDaMeta(
+        meta=meta,
+        atual=atual,
+        falta=max(ZERO, meta - atual),
+        progresso=atual / meta,
+    )

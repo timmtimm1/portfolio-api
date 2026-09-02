@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import uuid
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.base import ProvedorDeCotacoes
+from app.models.portfolio import Portfolio
 from app.schemas.portfolio import (
     EventoAplicado,
     PortfolioSummary,
@@ -23,7 +23,7 @@ CEM = Decimal(100)
 async def resumo(
     db: AsyncSession,
     provedor: ProvedorDeCotacoes,
-    portfolio_id: uuid.UUID,
+    carteira: Portfolio,
     *,
     ttl_segundos: int,
 ) -> PortfolioSummary:
@@ -34,6 +34,7 @@ async def resumo(
     fornecedor a toa. O resultado realizado delas continua somando no total,
     porque e dinheiro que o usuario de fato ganhou ou perdeu.
     """
+    portfolio_id = carteira.id
     posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertas = [p for p in posicoes if not p.esta_zerada]
 
@@ -70,10 +71,17 @@ async def resumo(
                 )
                 for e in eventos_por_ticker.get(posicao.ticker, [])
             ],
+            # `valor_atual` e o valor de MERCADO da posicao (o que ela vale
+            # hoje), com o custo como reserva quando nao ha cotacao -- a mesma
+            # regra que os totais ja seguem logo abaixo. Sem cotacao, dizer que
+            # a meta esta em zero seria pior que dizer que esta no custo.
             alvo=target_service.resumo_de(
                 alvos.get(posicao.ticker),
                 preco_medio=posicao.preco_medio,
                 preco_atual=cotacao.preco if cotacao else None,
+                valor_atual=(
+                    posicao.quantidade * cotacao.preco if cotacao else posicao.custo_total
+                ),
             ),
         )
         total_custo += posicao.custo_total
@@ -116,4 +124,5 @@ async def resumo(
             ),
         ),
         sem_cotacao=sem_cotacao,
+        meta=target_service.da_carteira(carteira, valor_mercado=total_mercado, alvos=alvos),
     )

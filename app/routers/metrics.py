@@ -162,7 +162,7 @@ async def rebalancear(
     lanca e o usuario.
     """
     resumo = await portfolio_service.resumo(
-        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+        db, provedor, carteira, ttl_segundos=settings.QUOTE_TTL_SECONDS
     )
 
     plano = rebalance.planejar(
@@ -228,7 +228,7 @@ async def simular(
     O valor inicial e lido da carteira, nao do pedido: ele e fato, nao premissa.
     """
     resumo = await portfolio_service.resumo(
-        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+        db, provedor, carteira, ttl_segundos=settings.QUOTE_TTL_SECONDS
     )
     inicial = resumo.totals.valor_mercado
 

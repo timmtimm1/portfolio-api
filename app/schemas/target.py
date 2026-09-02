@@ -31,6 +31,12 @@ class TargetSet(BaseModel):
     stop_loss_tipo: TipoAlvo | None = None
     stop_loss_valor: ValorDoAlvo | None = None
 
+    # Meta de acumulacao: quanto se quer ter neste ativo, em reais. Nao tem
+    # "tipo" -- sempre um valor absoluto, porque um percentual de acumulacao
+    # precisaria de uma base ("percentual de que?") que so existiria se a meta
+    # total da carteira fosse obrigatoria, e ela nao e.
+    meta_valor: Annotated[Decimal, Field(gt=0, le=Decimal("1e12"), decimal_places=6)] | None = None
+
     @model_validator(mode="after")
     def _tipo_e_valor_andam_juntos(self) -> TargetSet:
         """Tipo sem valor ou valor sem tipo e configuracao que o dominio nao
@@ -55,6 +61,27 @@ class TargetSet(BaseModel):
         return self
 
 
+class PortfolioGoalSet(BaseModel):
+    """Corpo do `PUT /portfolio/goal`. `valor: null` remove a meta."""
+
+    valor: Annotated[Decimal, Field(gt=0, le=Decimal("1e12"), decimal_places=6)] | None = None
+
+
+class MetaResumo(BaseModel):
+    """Progresso em direcao a uma meta de acumulacao, ja calculado.
+
+    `progresso` nao e limitado a 1: quem passou da meta ve 1,2 (120%), e a
+    tela decide como mostrar isso. Travar em 100% no servidor apagaria a
+    informacao de QUANTO se passou.
+    """
+
+    meta: Decimal
+    atual: Decimal
+    falta: Decimal
+    progresso: Decimal
+    atingida: bool
+
+
 class AlvoResumo(BaseModel):
     """Estado do alvo de um ativo, embutido em cada linha do resumo da
     carteira -- para a tela nao precisar de uma segunda chamada por ativo."""
@@ -64,3 +91,21 @@ class AlvoResumo(BaseModel):
     stop_loss_tipo: TipoAlvo | None = None
     stop_loss_valor: Decimal | None = None
     status: StatusAlvo = StatusAlvo.SEM_ALVO
+
+    # `None` quando nao ha meta definida para o ativo -- distinto de uma meta
+    # de valor zero, que o CHECK do banco nem deixa existir.
+    meta: MetaResumo | None = None
+
+
+class MetaDaCarteira(BaseModel):
+    """Meta de patrimonio da carteira inteira.
+
+    `soma_das_metas` e `nao_distribuido` existem por causa da escolha de ter
+    as duas coisas: a meta geral E as por ativo. Sem eles, a pessoa definiria
+    R$ 100 mil na carteira, R$ 20 mil em tres papeis, e nada na tela diria
+    que R$ 40 mil do objetivo ainda nao tem destino.
+    """
+
+    progresso: MetaResumo | None = None
+    soma_das_metas: Decimal
+    nao_distribuido: Decimal | None = None

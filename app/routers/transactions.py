@@ -22,7 +22,7 @@ from app.schemas.dividend import (
     DividendSyncResult,
 )
 from app.schemas.portfolio import PortfolioSummary
-from app.schemas.target import AlvoResumo, TargetSet
+from app.schemas.target import AlvoResumo, MetaDaCarteira, PortfolioGoalSet, TargetSet
 from app.schemas.transaction import (
     PositionRead,
     TransactionCreate,
@@ -225,7 +225,7 @@ async def resumo_da_carteira(
     melhor que falhar.
     """
     return await portfolio_service.resumo(
-        db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
+        db, provedor, carteira, ttl_segundos=settings.QUOTE_TTL_SECONDS
     )
 
 
@@ -259,6 +259,7 @@ async def definir_alvo(
         stop_gain_valor=dados.stop_gain_valor,
         stop_loss_tipo=dados.stop_loss_tipo,
         stop_loss_valor=dados.stop_loss_valor,
+        meta_valor=dados.meta_valor,
     )
 
     posicao = next(
@@ -270,9 +271,46 @@ async def definir_alvo(
         db, provedor, [ticker], ttl_segundos=settings.QUOTE_TTL_SECONDS
     )
     cotacao = cotacoes.get(ticker)
+    quantidade = posicao.quantidade if posicao else Decimal(0)
     return target_service.resumo_de(
-        alvo, preco_medio=preco_medio, preco_atual=cotacao.preco if cotacao else None
+        alvo,
+        preco_medio=preco_medio,
+        preco_atual=cotacao.preco if cotacao else None,
+        valor_atual=(
+            quantidade * cotacao.preco
+            if cotacao
+            else (posicao.custo_total if posicao else Decimal(0))
+        ),
     )
+
+
+@router.put(
+    "/portfolio/goal",
+    response_model=MetaDaCarteira,
+    summary="Define a meta de patrimonio da carteira inteira",
+)
+async def definir_meta_da_carteira(
+    carteira: CarteiraAtual,
+    db: DbDep,
+    provedor: ProvedorDep,
+    settings: SettingsDep,
+    dados: PortfolioGoalSet,
+) -> MetaDaCarteira:
+    """Meta do patrimonio total, independente das metas por ativo.
+
+    Sao duas coisas de proposito: a diferenca entre a meta geral e a soma das
+    metas por papel e justamente o que ainda nao tem destino definido -- e o
+    resumo devolve essa diferenca em `nao_distribuido`.
+
+    `valor: null` remove a meta.
+    """
+    carteira.meta_valor = dados.valor
+    await db.commit()
+
+    resumo = await portfolio_service.resumo(
+        db, provedor, carteira, ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )
+    return resumo.meta
 
 
 @router.delete(
