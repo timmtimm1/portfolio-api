@@ -114,3 +114,9 @@ class PositionRead(BaseModel):
     @field_serializer("custo_total", "resultado_realizado")
     def _serializa_dinheiro(self, v: Decimal) -> Decimal:
         return _dinheiro(v)
+
+
+class TransactionsClearedResult(BaseModel):
+    """Resultado de zerar o livro de uma carteira simulada de uma vez."""
+
+    removidas: int

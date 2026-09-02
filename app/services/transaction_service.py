@@ -8,13 +8,15 @@ acontece uma vez, em `get_carteira` -- o unico caminho pelo qual um
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import CursorResult, Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.asset import Asset
-from app.models.portfolio import Portfolio
+from app.models.portfolio import Portfolio, TipoCarteira
+from app.models.snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction, TransactionSide
 from app.schemas.transaction import TransactionCreate
 from app.services import split, split_service
@@ -24,6 +26,11 @@ from app.services.position import Posicao, calcular_posicoes
 
 class AtivoNaoEncontradoError(DomainError):
     pass
+
+
+class CarteiraRealNaoZeravelError(DomainError):
+    """A carteira real guarda operacoes de verdade; zerar tudo de uma vez nao e
+    uma opcao para ela -- so a remocao unitaria, uma a uma."""
 
 
 def _da_carteira(portfolio_id: uuid.UUID) -> Select[tuple[Transaction]]:
@@ -202,6 +209,43 @@ async def remover(db: AsyncSession, portfolio_id: uuid.UUID, transacao_id: uuid.
 
     await db.commit()
     return True
+
+
+async def remover_todas(db: AsyncSession, carteira: Portfolio) -> int:
+    """Zera o livro inteiro de uma vez. Devolve quantas operacoes saíram.
+
+    Existe porque `remover()` so tira uma por vez -- e revalida o livro a cada
+    chamada. Numa carteira simulada com meses de compra e venda, isso obriga a
+    apagar de tras para frente (senao uma compra antiga com venda posterior
+    recusa a remocao com 409) e um clique por linha. Para recomecar a
+    simulacao do zero, "um a um" nao e uma opcao pratica.
+
+    A REAL fica de fora, e por um motivo diferente do 409 unitario: la a
+    validacao por linha e uma trava contra erro de sequencia, aqui seria
+    apagar decadas de operacoes de verdade num clique so. Ledger-as-truth
+    significa que a transacao E o dado -- perde-la nao e "resetar", e destruir
+    o unico registro que existe.
+
+    Os snapshots vao junto. Sem nenhuma transacao, nao ha posicao nem valor a
+    fotografar -- manter os pontos antigos deixaria o grafico de evolucao
+    contando a historia de uma carteira que nao existe mais.
+    """
+    if carteira.tipo is TipoCarteira.REAL:
+        raise CarteiraRealNaoZeravelError(
+            "A carteira real nao pode ser zerada de uma vez. "
+            "Remova as operacoes uma a uma se precisar corrigir alguma."
+        )
+
+    # `CursorResult` expoe rowcount; o `Result` generico do stub nao. O cast
+    # documenta que um DELETE sempre devolve o primeiro (mesmo padrao de
+    # `snapshot_service.reconstruir_desde`).
+    resultado = cast(
+        CursorResult[Any],
+        await db.execute(delete(Transaction).where(Transaction.portfolio_id == carteira.id)),
+    )
+    await db.execute(delete(PortfolioSnapshot).where(PortfolioSnapshot.portfolio_id == carteira.id))
+    await db.commit()
+    return resultado.rowcount or 0
 
 
 async def posicoes(db: AsyncSession, portfolio_id: uuid.UUID) -> list[Posicao]:
