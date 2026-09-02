@@ -448,7 +448,17 @@
           <label class="campo"><span>Ativo</span><input id="op-ticker" placeholder="PETR4" required maxlength="6"></label>
           <label class="campo"><span>Operação</span><select id="op-lado"><option value="compra">Compra</option><option value="venda">Venda</option></select></label>
           <label class="campo"><span>Quantidade</span><input id="op-qtd" type="number" step="any" min="0" required placeholder="100"></label>
-          <label class="campo"><span>Preço</span><input id="op-preco" type="number" step="any" min="0" required placeholder="20,00"></label>
+          <label class="campo">
+            <span>Preço</span>
+            <span class="campo-preco">
+              <input id="op-preco" type="number" step="any" min="0" required placeholder="20,00">
+              <!-- So aparece com um ticker digitado -- sem ativo nao ha o que
+                   consultar. Busca a cotacao do mesmo fornecedor que ja
+                   precifica a carteira, entao nao gasta cota extra. -->
+              <button type="button" id="op-preco-cotacao" title="Preencher com a cotação atual">Usar cotação</button>
+            </span>
+            <span class="campo-dica" id="op-preco-dica" hidden></span>
+          </label>
           <label class="campo"><span>Taxas</span><input id="op-taxas" type="number" step="any" min="0" value="0"></label>
           <label class="campo">
             <span>Data</span>

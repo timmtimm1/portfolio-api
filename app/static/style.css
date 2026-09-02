@@ -111,6 +111,19 @@ h1, h2, h3, p { margin: 0; }
 }
 .campo-senha button:hover { background: rgba(123, 92, 255, .14); }
 
+.campo-preco { position: relative; display: block; }
+.campo-preco input { padding-right: 92px; }
+.campo-preco button {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; font-weight: 600; color: var(--violeta-2);
+  padding: 6px 9px; border-radius: 8px; white-space: nowrap;
+}
+.campo-preco button:hover:not(:disabled) { background: rgba(123, 92, 255, .14); }
+.campo-preco button:disabled { color: var(--txt-3); cursor: default; }
+
+/* Diz de onde veio o numero, para o preenchimento nao parecer magica. */
+.campo-dica { display: block; font-size: 11.5px; color: var(--txt-3); margin-top: 4px; }
+
 /* Data: o <input type="date"> nativo desenha a data no idioma do NAVEGADOR,
    nao no da pagina -- com o Chrome em ingles sai mm/dd/aaaa mesmo sob
    lang="pt-BR", e nao existe atributo nem CSS que mude isso. O campo visivel

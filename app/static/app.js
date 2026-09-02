@@ -1478,10 +1478,51 @@ $("#btn-nova").addEventListener("click", () => {
   form.hidden = !form.hidden;
   if (!form.hidden) {
     $("#op-data").value = isoParaBR(hojeISO());
+    $("#op-preco-dica").hidden = true;
     $("#op-ticker").focus();
   }
 });
 $("#op-cancelar").addEventListener("click", () => { $("#form-op").hidden = true; });
+
+// "Usar cotação": poupa digitar o preço de hoje na mão. Busca a MESMA cotação
+// que já precifica a carteira (cache de 15 min, brapi → Yahoo) -- não gasta
+// cota extra do fornecedor.
+//
+// A dica embaixo do campo diz de onde veio o número: preencher em silêncio
+// pareceria mágica, e um preço errado sem explicação é mais difícil de notar
+// que um preço errado que a pessoa mesma digitou.
+$("#op-preco-cotacao").addEventListener("click", async () => {
+  const ticker = $("#op-ticker").value.trim().toUpperCase();
+  const dica = $("#op-preco-dica");
+  const botao = $("#op-preco-cotacao");
+
+  if (!ticker) {
+    dica.textContent = "Digite o ativo primeiro.";
+    dica.hidden = false;
+    $("#op-ticker").focus();
+    return;
+  }
+
+  botao.disabled = true;
+  botao.textContent = "Buscando…";
+  try {
+    const cot = await api(`/assets/${ticker}/quote`);
+    $("#op-preco").value = Number(cot.preco).toFixed(2);
+    const minutos = Math.max(0, Math.round((Date.now() - new Date(cot.obtida_em)) / 60000));
+    const idade = minutos === 0 ? "agora" : `há ${minutos} min`;
+    dica.textContent = `${brl.format(cot.preco)} via ${cot.fonte}, ${idade} — edite se precisar.`;
+    dica.hidden = false;
+  } catch (e) {
+    dica.textContent = e.message;
+    dica.hidden = false;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Usar cotação";
+  }
+});
+
+// Muda o ativo, a dica antiga (de outro ticker) deixa de fazer sentido.
+$("#op-ticker").addEventListener("input", () => { $("#op-preco-dica").hidden = true; });
 
 /* O campo de data: texto mascarado na frente, calendario nativo atras.
    O nativo existe so como seletor -- quem guarda o valor e o campo de texto. */
@@ -1538,6 +1579,7 @@ $("#form-op").addEventListener("submit", async (ev) => {
     });
     $("#form-op").reset();
     $("#form-op").hidden = true;
+    $("#op-preco-dica").hidden = true;
     invalidar();
     await carregarTransacoes();
   } catch (e) {
@@ -1570,6 +1612,7 @@ $("#busca").addEventListener("input", (ev) => {
           $("#form-op").hidden = false;
           $("#op-ticker").value = a.ticker;
           $("#op-data").value = isoParaBR(hojeISO());
+          $("#op-preco-dica").hidden = true;
           $("#op-qtd").focus();
           caixa.hidden = true;
           ev.target.value = "";
