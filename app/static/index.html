@@ -431,7 +431,16 @@
     <section class="vista" data-vista="transacoes" hidden>
       <div class="titulo-linha">
         <h1>Transações</h1>
-        <button class="btn btn--primario btn--pequeno" id="btn-nova">Nova operação</button>
+        <div class="titulo-acoes">
+          <!-- So visivel na carteira simulada -- mesma logica de visibilidade do
+               botao de apagar carteira. Recomecar uma simulacao do zero exigia
+               apagar operacao por operacao, uma por uma; isto zera o livro
+               inteiro num passo so. -->
+          <button class="btn btn--fantasma btn--pequeno btn--zerar" id="btn-zerar-transacoes" hidden>
+            Zerar transações
+          </button>
+          <button class="btn btn--primario btn--pequeno" id="btn-nova">Nova operação</button>
+        </div>
       </div>
 
       <form class="cartao form-op" id="form-op" hidden>

@@ -248,6 +248,7 @@ async function carregarCarteiras() {
   // fica desabilitada: um botão cinza convida a tentar e depois frustra. A
   // recusa de verdade está no backend (409); isto aqui é só não oferecer.
   $("#btn-apagar-carteira").hidden = !atual || atual.tipo !== "simulada";
+  $("#btn-zerar-transacoes").hidden = !atual || atual.tipo !== "simulada";
 }
 
 async function entrarNoApp() {
@@ -1598,6 +1599,32 @@ $("#carteira").addEventListener("change", async (ev) => {
   carteiraAtiva = ev.target.value;
   invalidar();
   await carregarCarteiras();
+});
+
+$("#btn-zerar-transacoes").addEventListener("click", async () => {
+  const atual = carteiras.find((c) => c.id === carteiraAtiva);
+  if (!atual || atual.tipo !== "simulada") return;
+
+  // Mesma logica do "apagar carteira": a confirmação diz quantas operações
+  // vão sumir, em vez de um "tem certeza?" genérico que se clica no reflexo.
+  let detalhe = "";
+  try {
+    const ops = await api(`/transactions?portfolio_id=${atual.id}&limit=1`);
+    const n = ops.total;
+    detalhe = `\n\nVocê perde ${n} operação${n === 1 ? "" : "ões"} e todo o histórico do gráfico.`;
+  } catch {
+    detalhe = "\n\nIsso apaga todas as operações e todo o histórico dela.";
+  }
+
+  if (!confirm(`Zerar as transações de "${atual.nome}"?${detalhe}\n\nNão dá para desfazer.`)) return;
+
+  try {
+    await api(comCarteira("/transactions"), { method: "DELETE" });
+    invalidar();
+    await carregarTransacoes();
+  } catch (e) {
+    alert(e.message);
+  }
 });
 
 $("#btn-apagar-carteira").addEventListener("click", async () => {

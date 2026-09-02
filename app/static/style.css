@@ -300,6 +300,12 @@ h1, h2, h3, p { margin: 0; }
   padding: 5px 11px; border-radius: 999px;
 }
 .controles { margin-left: auto; display: flex; align-items: flex-end; gap: 12px; }
+.titulo-acoes { display: flex; align-items: center; gap: 10px; }
+
+/* Ghost padrao, mas com aviso: e uma acao destrutiva, e a cor sinaliza isso
+   sem precisar de um botao vermelho cheio competindo com o "Nova operação". */
+.btn--zerar { color: var(--txt-3); }
+.btn--zerar:hover { color: var(--vermelho); background: rgba(251, 113, 133, .1); }
 .controle { display: grid; gap: 5px; }
 .controle span { font-size: 11px; color: var(--txt-3); }
 .controle select { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--r-s); padding: 7px 11px; outline: none; }
