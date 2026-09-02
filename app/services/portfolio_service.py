@@ -14,7 +14,7 @@ from app.schemas.portfolio import (
     PortfolioTotals,
     PositionSummary,
 )
-from app.services import quote_service, transaction_service
+from app.services import quote_service, target_service, transaction_service
 
 ZERO = Decimal(0)
 CEM = Decimal(100)
@@ -45,12 +45,17 @@ async def resumo(
     cotacoes = await quote_service.cotacoes_atuais(
         db, provedor, [p.ticker for p in abertas], ttl_segundos=ttl_segundos
     )
+    # Um alvo so faz sentido enquanto a posicao existe: com a query indexada
+    # por ticker, uma posicao zerada e reaberta depois volta a enxergar o
+    # mesmo alvo que estava configurado antes de zerar.
+    alvos = await target_service.dos_ativos(db, portfolio_id)
 
     linhas: list[PositionSummary] = []
     sem_cotacao: list[str] = []
     total_custo = total_mercado = ZERO
 
     for posicao in abertas:
+        cotacao = cotacoes.get(posicao.ticker)
         linha = PositionSummary(
             ticker=posicao.ticker,
             quantidade=posicao.quantidade,
@@ -65,10 +70,14 @@ async def resumo(
                 )
                 for e in eventos_por_ticker.get(posicao.ticker, [])
             ],
+            alvo=target_service.resumo_de(
+                alvos.get(posicao.ticker),
+                preco_medio=posicao.preco_medio,
+                preco_atual=cotacao.preco if cotacao else None,
+            ),
         )
         total_custo += posicao.custo_total
 
-        cotacao = cotacoes.get(posicao.ticker)
         if cotacao is None:
             sem_cotacao.append(posicao.ticker)
             # Sem preco, o ativo entra no total de mercado pelo CUSTO. Entrar

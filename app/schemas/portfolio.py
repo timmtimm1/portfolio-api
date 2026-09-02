@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.schemas.target import AlvoResumo
 from app.schemas.transaction import _dinheiro, _enxuto
 
 
@@ -53,6 +54,11 @@ class PositionSummary(BaseModel):
     # Vazio na esmagadora maioria dos casos -- so tem conteudo quando houve
     # desdobramento, grupamento ou bonificacao DEPOIS da primeira compra.
     eventos: list[EventoAplicado] = Field(default_factory=list)
+
+    # Sempre presente (nunca null), mesmo sem alvo configurado -- `status`
+    # comeca em SEM_ALVO e os demais campos em None. Poupa a tela de checar
+    # nulidade do objeto inteiro antes de olhar o status.
+    alvo: AlvoResumo = Field(default_factory=AlvoResumo)
 
     @field_serializer("quantidade", "preco_medio", "preco_atual")
     def _s_quantidade(self, v: Decimal | None) -> Decimal | None:

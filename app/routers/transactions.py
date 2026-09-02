@@ -22,6 +22,7 @@ from app.schemas.dividend import (
     DividendSyncResult,
 )
 from app.schemas.portfolio import PortfolioSummary
+from app.schemas.target import AlvoResumo, TargetSet
 from app.schemas.transaction import (
     PositionRead,
     TransactionCreate,
@@ -33,8 +34,10 @@ from app.services import (
     dividend,
     dividend_service,
     portfolio_service,
+    quote_service,
     snapshot_service,
     split_service,
+    target_service,
     transaction_service,
 )
 from app.services.position import VendaSemPosicaoError
@@ -224,6 +227,65 @@ async def resumo_da_carteira(
     return await portfolio_service.resumo(
         db, provedor, carteira.id, ttl_segundos=settings.QUOTE_TTL_SECONDS
     )
+
+
+@router.put(
+    "/portfolio/targets/{ticker}",
+    response_model=AlvoResumo,
+    summary="Define o stop gain / stop loss de um ativo nesta carteira",
+)
+async def definir_alvo(
+    carteira: CarteiraAtual,
+    db: DbDep,
+    provedor: ProvedorDep,
+    settings: SettingsDep,
+    ticker: str,
+    dados: TargetSet,
+) -> AlvoResumo:
+    """Este app nao vende nada sozinho -- o alvo e um lembrete visual, nao uma
+    ordem. `avaliar()` roda de novo aqui so para a resposta do PUT ja vir com
+    o status atualizado, sem o cliente precisar de um segundo GET.
+    """
+    ticker = ticker.strip().upper()
+    ativo = await asset_service.buscar_por_ticker(db, ticker)
+    if ativo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ativo nao encontrado")
+
+    alvo = await target_service.definir(
+        db,
+        carteira,
+        ativo.id,
+        stop_gain_tipo=dados.stop_gain_tipo,
+        stop_gain_valor=dados.stop_gain_valor,
+        stop_loss_tipo=dados.stop_loss_tipo,
+        stop_loss_valor=dados.stop_loss_valor,
+    )
+
+    posicao = next(
+        (p for p in await transaction_service.posicoes(db, carteira.id) if p.ticker == ticker),
+        None,
+    )
+    preco_medio = posicao.preco_medio if posicao else Decimal(0)
+    cotacoes = await quote_service.cotacoes_atuais(
+        db, provedor, [ticker], ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )
+    cotacao = cotacoes.get(ticker)
+    return target_service.resumo_de(
+        alvo, preco_medio=preco_medio, preco_atual=cotacao.preco if cotacao else None
+    )
+
+
+@router.delete(
+    "/portfolio/targets/{ticker}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove o alvo de um ativo nesta carteira",
+)
+async def remover_alvo(carteira: CarteiraAtual, db: DbDep, ticker: str) -> None:
+    ticker = ticker.strip().upper()
+    ativo = await asset_service.buscar_por_ticker(db, ticker)
+    if ativo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ativo nao encontrado")
+    await target_service.remover(db, carteira, ativo.id)
 
 
 @router.get(
