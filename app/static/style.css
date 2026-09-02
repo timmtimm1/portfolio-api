@@ -704,3 +704,73 @@ h1, h2, h3, p { margin: 0; }
 .aviso-demo p { margin: 0; color: var(--txt-2); font-size: .75rem; line-height: 1.45; }
 .aviso-demo-prazo { margin-top: .35rem !important; color: var(--txt-3) !important; }
 .aviso-demo-prazo span { color: var(--ouro); font-variant-numeric: tabular-nums; }
+
+/* ══ ALVO (stop gain / stop loss) ══ */
+
+/* Selo na coluna "Alvo" da tabela de posições. Verde/vermelho só quando o
+   alvo foi de fato atingido -- "dentro" e "sem alvo" ficam neutros, porque
+   não há nada de bom ou ruim acontecendo, só um estado. */
+.selo-alvo {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer; border: none;
+  font-family: inherit; white-space: nowrap;
+}
+.selo-alvo[data-status="sem_alvo"] {
+  background: rgba(255, 255, 255, .05); color: var(--txt-3);
+}
+.selo-alvo[data-status="sem_alvo"]:hover { background: rgba(255, 255, 255, .09); color: var(--txt-2); }
+.selo-alvo[data-status="dentro"] {
+  background: rgba(123, 92, 255, .12); color: var(--violeta-2);
+}
+.selo-alvo[data-status="gain_atingido"] {
+  background: rgba(52, 211, 153, .16); color: var(--verde);
+}
+.selo-alvo[data-status="loss_atingido"] {
+  background: rgba(251, 113, 133, .16); color: var(--vermelho);
+}
+
+/* ══ Modal ══ */
+
+.modal-fundo {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 3, 10, .6); backdrop-filter: blur(3px);
+  padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 420px;
+  background: var(--bg-2); border: 1px solid var(--borda-forte);
+  border-radius: var(--r); box-shadow: var(--sombra);
+  padding: 22px 24px; display: grid; gap: 16px;
+}
+.modal-cabeca { display: flex; align-items: center; justify-content: space-between; }
+.modal-cabeca h2 { font-size: 16px; font-weight: 700; }
+.modal-fechar {
+  width: 28px; height: 28px; border-radius: 8px;
+  color: var(--txt-3); font-size: 13px;
+}
+.modal-fechar:hover { background: rgba(255, 255, 255, .07); color: var(--txt); }
+.modal-aviso { font-size: 12px; color: var(--txt-3); line-height: 1.5; margin-top: -8px; }
+
+.alvo-secao { border: none; padding: 0; display: grid; gap: 8px; }
+.alvo-secao legend {
+  font-size: 12px; font-weight: 600; color: var(--txt-2);
+  padding: 0; margin-bottom: 2px;
+}
+.alvo-linha { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
+.alvo-linha select, .alvo-linha input {
+  background: rgba(10, 9, 20, .65);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-s);
+  padding: 10px 11px;
+  outline: none;
+  color: var(--txt);
+  font-size: 13.5px;
+  transition: border-color .16s, box-shadow .16s;
+}
+.alvo-linha select:focus, .alvo-linha input:focus {
+  border-color: var(--violeta);
+  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
+}
+.alvo-linha input:disabled { opacity: .4; cursor: not-allowed; }

@@ -246,7 +246,7 @@
             <thead><tr>
               <th>Ativo</th><th class="num">Qtd.</th><th class="num">Preço médio</th>
               <th class="num">Cotação</th><th class="num">Custo</th><th class="num">Valor</th>
-              <th class="num">Resultado</th><th class="num">Var.</th>
+              <th class="num">Resultado</th><th class="num">Var.</th><th class="num">Alvo</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -495,6 +495,54 @@
       </article>
     </section>
   </main>
+
+  <!-- Modal do alvo (stop gain / stop loss). Fica fora do fluxo normal da
+       tela -- um overlay fixo, escondido por padrão -- porque é a primeira
+       tela do app que precisa editar vários campos relacionados fora de um
+       formulário inline; um `prompt()` não comportaria quatro campos. -->
+  <div class="modal-fundo" id="modal-alvo" hidden>
+    <form class="modal" id="form-alvo">
+      <div class="modal-cabeca">
+        <h2>Alvo de <span id="alvo-ticker"></span></h2>
+        <button type="button" class="modal-fechar" id="alvo-fechar" aria-label="Fechar">✕</button>
+      </div>
+      <p class="modal-aviso">
+        Isto não vende nada sozinho -- é um lembrete visual. A decisão continua sua.
+      </p>
+
+      <fieldset class="alvo-secao">
+        <legend>Stop gain</legend>
+        <div class="alvo-linha">
+          <select id="alvo-gain-tipo">
+            <option value="">Sem alvo</option>
+            <option value="percentual">% acima do preço médio</option>
+            <option value="preco">Preço fixo</option>
+          </select>
+          <input id="alvo-gain-valor" type="number" step="any" min="0" placeholder="ex: 15" disabled>
+        </div>
+        <span class="campo-dica" id="alvo-gain-dica" hidden></span>
+      </fieldset>
+
+      <fieldset class="alvo-secao">
+        <legend>Stop loss</legend>
+        <div class="alvo-linha">
+          <select id="alvo-loss-tipo">
+            <option value="">Sem alvo</option>
+            <option value="percentual">% abaixo do preço médio</option>
+            <option value="preco">Preço fixo</option>
+          </select>
+          <input id="alvo-loss-valor" type="number" step="any" min="0" placeholder="ex: 8" disabled>
+        </div>
+        <span class="campo-dica" id="alvo-loss-dica" hidden></span>
+      </fieldset>
+
+      <p class="erro" id="alvo-erro" role="alert" hidden></p>
+      <div class="form-acoes">
+        <button type="button" class="btn btn--fantasma" id="alvo-remover" hidden>Remover alvo</button>
+        <button type="submit" class="btn btn--primario">Salvar</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>

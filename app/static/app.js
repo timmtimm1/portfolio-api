@@ -473,6 +473,151 @@ function marcaDeEvento(p) {
   return marca;
 }
 
+/* ═══ Alvo (stop gain / stop loss) ═══ */
+
+const ROTULO_STATUS_ALVO = {
+  sem_alvo: "Definir alvo",
+  gain_atingido: "Gain atingido",
+  loss_atingido: "Loss atingido",
+};
+
+// Resume o que está configurado, para caber no selo sem abrir o modal --
+// "+15% / -8%" já diz tudo, e é o texto que aparece quando o preço ainda não
+// cruzou nenhum dos dois lados.
+function resumoDoAlvo(alvo) {
+  const partes = [];
+  if (alvo.stop_gain_tipo) {
+    partes.push(alvo.stop_gain_tipo === "percentual" ? `+${proporcao(alvo.stop_gain_valor)}` : brl.format(alvo.stop_gain_valor));
+  }
+  if (alvo.stop_loss_tipo) {
+    partes.push(alvo.stop_loss_tipo === "percentual" ? `-${proporcao(alvo.stop_loss_valor)}` : brl.format(alvo.stop_loss_valor));
+  }
+  return partes.join(" / ");
+}
+
+function seloDeAlvo(p) {
+  const selo = el("button", "selo-alvo");
+  selo.type = "button";
+  selo.dataset.status = p.alvo.status;
+  selo.textContent = ROTULO_STATUS_ALVO[p.alvo.status] ?? resumoDoAlvo(p.alvo);
+  selo.addEventListener("click", () => abrirModalAlvo(p));
+  return selo;
+}
+
+let alvoTickerAtual = null;
+
+// Cada input de valor guarda um numero "de gente": 15 para 15%, nao 0.15. A
+// API guarda fracao -- a conversao acontece so nas duas bordas (aqui e no
+// envio), pra tela nunca mostrar "0,15%" quando o usuario quis dizer 15%.
+function prepararLadoDoAlvo(prefixo, tipo, valor, precoMedio) {
+  const selectTipo = $(`#alvo-${prefixo}-tipo`);
+  const inputValor = $(`#alvo-${prefixo}-valor`);
+  const dica = $(`#alvo-${prefixo}-dica`);
+
+  selectTipo.value = tipo ?? "";
+  inputValor.disabled = !tipo;
+  inputValor.value = tipo === "percentual" ? num(Number(valor) * 100) : tipo === "preco" ? num(valor) : "";
+
+  atualizarDicaDoAlvo(prefixo, precoMedio, prefixo === "gain" ? 1 : -1);
+  selectTipo.onchange = () => {
+    inputValor.disabled = !selectTipo.value;
+    inputValor.value = "";
+    dica.hidden = true;
+  };
+  inputValor.oninput = () => atualizarDicaDoAlvo(prefixo, precoMedio, prefixo === "gain" ? 1 : -1);
+}
+
+// Só existe para tipo=percentual: mostra a que preço em reais aquilo
+// corresponde HOJE, porque "15% acima do médio" não é um número que a
+// cabeça converte de cabeça na hora de decidir.
+function atualizarDicaDoAlvo(prefixo, precoMedio, sinal) {
+  const selectTipo = $(`#alvo-${prefixo}-tipo`);
+  const inputValor = $(`#alvo-${prefixo}-valor`);
+  const dica = $(`#alvo-${prefixo}-dica`);
+
+  const numero = Number(inputValor.value);
+  if (selectTipo.value !== "percentual" || !numero || !precoMedio) {
+    dica.hidden = true;
+    return;
+  }
+  const limite = precoMedio * (1 + (sinal * numero) / 100);
+  dica.textContent = `= ${brl.format(limite)}, sobre o preço médio de ${brl.format(precoMedio)}`;
+  dica.hidden = false;
+}
+
+function abrirModalAlvo(p) {
+  alvoTickerAtual = p.ticker;
+  $("#alvo-ticker").textContent = p.ticker;
+  $("#alvo-erro").hidden = true;
+  $("#alvo-remover").hidden = p.alvo.status === "sem_alvo";
+
+  prepararLadoDoAlvo("gain", p.alvo.stop_gain_tipo, p.alvo.stop_gain_valor, p.preco_medio);
+  prepararLadoDoAlvo("loss", p.alvo.stop_loss_tipo, p.alvo.stop_loss_valor, p.preco_medio);
+
+  $("#modal-alvo").hidden = false;
+}
+
+function fecharModalAlvo() {
+  $("#modal-alvo").hidden = true;
+  alvoTickerAtual = null;
+}
+
+$("#alvo-fechar").addEventListener("click", fecharModalAlvo);
+// Clicar no fundo escurecido fecha; clicar dentro do cartão, não -- o evento
+// só chega aqui quando o alvo do clique é o próprio fundo (`ev.target`).
+$("#modal-alvo").addEventListener("click", (ev) => { if (ev.target.id === "modal-alvo") fecharModalAlvo(); });
+
+// Converte "de gente" (15) para fração (0.15) só na saída -- o mesmo motivo
+// de `prepararLadoDoAlvo` fazer o inverso na entrada.
+function corpoDoLado(prefixo) {
+  const tipo = $(`#alvo-${prefixo}-tipo`).value;
+  if (!tipo) return { tipo: null, valor: null };
+  const numero = Number($(`#alvo-${prefixo}-valor`).value);
+  return { tipo, valor: tipo === "percentual" ? numero / 100 : numero };
+}
+
+$("#form-alvo").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const erro = $("#alvo-erro");
+  erro.hidden = true;
+
+  const gain = corpoDoLado("gain");
+  const loss = corpoDoLado("loss");
+  if ((gain.tipo && !gain.valor) || (loss.tipo && !loss.valor)) {
+    erro.textContent = "Preencha o valor de cada alvo marcado, ou deixe em \"Sem alvo\".";
+    erro.hidden = false;
+    return;
+  }
+
+  try {
+    await api(comCarteira(`/portfolio/targets/${alvoTickerAtual}`), {
+      method: "PUT",
+      body: JSON.stringify({
+        stop_gain_tipo: gain.tipo,
+        stop_gain_valor: gain.valor,
+        stop_loss_tipo: loss.tipo,
+        stop_loss_valor: loss.valor,
+      }),
+    });
+    fecharModalAlvo();
+    await carregarPosicoes();
+  } catch (e) {
+    erro.textContent = e.message;
+    erro.hidden = false;
+  }
+});
+
+$("#alvo-remover").addEventListener("click", async () => {
+  try {
+    await api(comCarteira(`/portfolio/targets/${alvoTickerAtual}`), { method: "DELETE" });
+    fecharModalAlvo();
+    await carregarPosicoes();
+  } catch (e) {
+    $("#alvo-erro").textContent = e.message;
+    $("#alvo-erro").hidden = false;
+  }
+});
+
 function renderPosicoesResumo(posicoes) {
   const lista = $("#lista-posicoes");
   limpar(lista);
@@ -902,7 +1047,7 @@ async function carregarPosicoes() {
   if (!resumo.positions.length) {
     const tr = el("tr");
     const td = el("td", "vazio", "Nenhuma posição aberta.");
-    td.colSpan = 8;
+    td.colSpan = 9;
     tr.append(td);
     corpo.append(tr);
   }
@@ -922,6 +1067,9 @@ async function carregarPosicoes() {
     tr.append(r);
     tr.append(el("td", `num ${p.variacao_percentual === null ? "" : sinal(p.variacao_percentual)}`,
       p.variacao_percentual === null ? "—" : pct(p.variacao_percentual / 100)));
+    const tdAlvo = el("td", "num");
+    tdAlvo.append(seloDeAlvo(p));
+    tr.append(tdAlvo);
     corpo.append(tr);
   }
 
