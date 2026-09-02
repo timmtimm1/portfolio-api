@@ -7,11 +7,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from app.core.deps import CurrentUser, DbDep
+from app.core.deps import CurrentUser, DbDep, ProvedorDep, SettingsDep
 from app.models.asset import AssetType
-from app.schemas.asset import AssetRead, PricePoint
+from app.schemas.asset import AssetRead, PricePoint, QuoteRead
 from app.schemas.common import LIMITE_MAXIMO, LIMITE_PADRAO, Page
-from app.services import asset_service
+from app.services import asset_service, quote_service
 
 # `dependencies=[...]` no router inteiro, nao rota a rota.
 #
@@ -70,6 +70,45 @@ async def obter_ativo(
     if ativo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ativo nao encontrado")
     return AssetRead.model_validate(ativo)
+
+
+@router.get(
+    "/{ticker}/quote",
+    response_model=QuoteRead,
+    summary="Cotacao atual, para pre-preencher o preco de uma operacao",
+)
+async def cotacao_do_ativo(
+    _: CurrentUser,
+    db: DbDep,
+    provedor: ProvedorDep,
+    settings: SettingsDep,
+    ticker: Annotated[str, Path(max_length=12, pattern=r"^[A-Za-z0-9]{4,6}$")],
+) -> QuoteRead:
+    """Poupa quem esta lancando uma compra de ir atras do preco de hoje.
+
+    Passa pelo mesmo cache de `quote_service` usado no resto do app -- pedir a
+    cotacao aqui nao gasta cota extra do fornecedor alem do que a tela ja
+    consumiria ao mostrar a posicao.
+
+    404 quando o ticker nao existe no catalogo OU quando nenhum fornecedor
+    devolveu preco para ele -- as duas coisas tem a mesma consequencia para
+    quem preenche o formulario: nao ha preco para sugerir, digite o seu.
+    """
+    ticker = ticker.strip().upper()
+    ativo = await asset_service.buscar_por_ticker(db, ticker)
+    if ativo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ativo nao encontrado")
+
+    cotacoes = await quote_service.cotacoes_atuais(
+        db, provedor, [ticker], ttl_segundos=settings.QUOTE_TTL_SECONDS
+    )
+    atual = cotacoes.get(ticker)
+    if atual is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Cotacao indisponivel para {ticker}",
+        )
+    return QuoteRead(preco=atual.preco, obtida_em=atual.obtida_em, fonte=atual.fonte)
 
 
 @router.get(
