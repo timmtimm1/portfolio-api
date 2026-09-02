@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.services.target import Alvo, StatusAlvo, TipoAlvo, avaliar
+from app.services.target import Alvo, StatusAlvo, TipoAlvo, avaliar, progresso_da_meta
 
 
 class TestSemAlvo:
@@ -121,3 +121,47 @@ class TestOsDoisLadosJuntos:
         )
         r = avaliar(alvo, preco_medio=Decimal(20), preco_atual=Decimal("20.50"))
         assert r is StatusAlvo.DENTRO
+
+
+class TestProgressoDaMeta:
+    """Meta de acumulacao: quanto falta comprar para chegar no tamanho de
+    posicao desejado. Conta simples, conferida a mao."""
+
+    def test_sem_meta_definida_devolve_nada(self) -> None:
+        """`None`, e nao um progresso de zero: a tela precisa distinguir "sem
+        meta" de "meta com zero por cento andado" -- a primeira nao desenha
+        barra nenhuma."""
+        assert progresso_da_meta(Decimal(500), None) is None
+
+    def test_meta_zero_ou_negativa_devolve_nada(self) -> None:
+        """O CHECK do banco ja impede gravar, mas a funcao e publica e nao
+        pode dividir por zero se alguem chamar direto."""
+        assert progresso_da_meta(Decimal(500), Decimal(0)) is None
+
+    def test_metade_do_caminho(self) -> None:
+        p = progresso_da_meta(Decimal(500), Decimal(1000))
+        assert p is not None
+        assert p.progresso == Decimal("0.5")
+        assert p.falta == Decimal(500)
+        assert p.atingida is False
+
+    def test_meta_exatamente_batida(self) -> None:
+        p = progresso_da_meta(Decimal(1000), Decimal(1000))
+        assert p is not None
+        assert p.falta == Decimal(0)
+        assert p.atingida is True
+
+    def test_passou_da_meta_nao_trava_em_cem_por_cento(self) -> None:
+        """`progresso` acima de 1 e informacao, nao erro: travar no servidor
+        apagaria o QUANTO se passou. Quem desenha a barra e que decide onde
+        parar de encher."""
+        p = progresso_da_meta(Decimal(1300), Decimal(1000))
+        assert p is not None
+        assert p.progresso == Decimal("1.3")
+        assert p.atingida is True
+
+    def test_falta_nunca_fica_negativo(self) -> None:
+        """Quem passou da meta nao tem "menos R$ 300 faltando", tem zero."""
+        p = progresso_da_meta(Decimal(1300), Decimal(1000))
+        assert p is not None
+        assert p.falta == Decimal(0)
