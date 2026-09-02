@@ -1,0 +1,318 @@
+"""Testes do alvo de preco pela API: definir, remover, e o status embutido
+no resumo da carteira.
+
+O calculo em si (limites, ordem gain/loss) ja esta coberto em
+`test_target.py`, contra numeros conferidos a mao. Aqui o foco e outro:
+persistencia, upsert, isolamento entre contas e entre carteiras, e validacao
+na borda.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.conftest import ProvedorFake
+from tests.factories import criar_ativo, op, segunda_conta, usuario_logado
+
+
+class TestDefinirAlvo:
+    async def test_define_os_dois_lados_e_devolve_o_status_ja_calculado(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """O ponto do PUT devolver o status: poupa um GET extra so para saber
+        se o alvo que acabou de ser salvo ja bateu ou nao."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        provedor.precos = {"PETR4": "22.00"}  # entre 18,40 (loss) e 23,00 (gain)
+
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={
+                "stop_gain_tipo": "percentual",
+                "stop_gain_valor": "0.15",
+                "stop_loss_tipo": "percentual",
+                "stop_loss_valor": "0.08",
+            },
+            headers=h,
+        )
+
+        assert resp.status_code == 200
+        corpo = resp.json()
+        assert corpo["status"] == "dentro"
+        assert Decimal(corpo["stop_gain_valor"]) == Decimal("0.15")
+        assert Decimal(corpo["stop_loss_valor"]) == Decimal("0.08")
+
+    async def test_status_ja_atingido_no_momento_de_salvar(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        provedor.precos = {"PETR4": "30.00"}  # ja acima do gain de 15% (23,00)
+
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "percentual", "stop_gain_valor": "0.15"},
+            headers=h,
+        )
+        assert resp.json()["status"] == "gain_atingido"
+
+    async def test_ticker_em_minusculas_funciona(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/petr4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=h,
+        )
+        assert resp.status_code == 200
+
+    async def test_ticker_fora_do_catalogo_devolve_404(self, client: AsyncClient) -> None:
+        _, h = await usuario_logado(client)
+        resp = await client.put("/portfolio/targets/XXXX9", json={}, headers=h)
+        assert resp.status_code == 404
+
+    async def test_definir_de_novo_substitui_o_lado_nao_reenviado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Upsert e TOTAL: reenviar so o stop gain apaga o stop loss que
+        estava configurado antes -- nao existe atualizacao parcial por fora."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.put(
+            "/portfolio/targets/PETR4",
+            json={
+                "stop_gain_tipo": "percentual",
+                "stop_gain_valor": "0.15",
+                "stop_loss_tipo": "percentual",
+                "stop_loss_valor": "0.08",
+            },
+            headers=h,
+        )
+
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "percentual", "stop_gain_valor": "0.20"},
+            headers=h,
+        )
+
+        corpo = resp.json()
+        assert Decimal(corpo["stop_gain_valor"]) == Decimal("0.20")
+        assert corpo["stop_loss_tipo"] is None
+        assert corpo["stop_loss_valor"] is None
+
+
+class TestValidacao:
+    async def test_tipo_sem_valor_e_recusado(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/PETR4", json={"stop_gain_tipo": "percentual"}, headers=h
+        )
+        assert resp.status_code == 422
+
+    async def test_valor_sem_tipo_e_recusado(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/PETR4", json={"stop_gain_valor": "0.10"}, headers=h
+        )
+        assert resp.status_code == 422
+
+    async def test_stop_loss_percentual_acima_de_cem_por_cento_e_recusado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Uma posicao nao cai mais que 100% do que custou -- perder mais que
+        isso so seria possivel numa operacao alavancada, que este app nao
+        modela."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_loss_tipo": "percentual", "stop_loss_valor": "1.5"},
+            headers=h,
+        )
+        assert resp.status_code == 422
+
+    async def test_stop_gain_percentual_acima_de_cem_por_cento_e_permitido(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Diferente do loss: uma acao pode multiplicar por 10 -- nao ha teto
+        natural para o lado do ganho."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "percentual", "stop_gain_valor": "5"},
+            headers=h,
+        )
+        assert resp.status_code == 200
+
+    async def test_valor_zero_ou_negativo_e_recusado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "0"},
+            headers=h,
+        )
+        assert resp.status_code == 422
+
+
+class TestRemoverAlvo:
+    async def test_remove_o_alvo(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=h,
+        )
+
+        resp = await client.delete("/portfolio/targets/PETR4", headers=h)
+        assert resp.status_code == 204
+
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        resumo = await client.get("/portfolio/summary", headers=h)
+        alvo = next(p["alvo"] for p in resumo.json()["positions"] if p["ticker"] == "PETR4")
+        assert alvo["status"] == "sem_alvo"
+
+    async def test_remover_alvo_inexistente_nao_e_erro(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Remover o que ja nao existe chega ao mesmo estado -- nao ha razao
+        para a tela tratar isso como falha."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        resp = await client.delete("/portfolio/targets/PETR4", headers=h)
+        assert resp.status_code == 204
+
+
+class TestNoResumoDaCarteira:
+    async def test_posicao_sem_alvo_vem_com_status_sem_alvo(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+
+        resumo = await client.get("/portfolio/summary", headers=h)
+        alvo = resumo.json()["positions"][0]["alvo"]
+        assert alvo["status"] == "sem_alvo"
+        assert alvo["stop_gain_tipo"] is None
+
+    async def test_alvo_sobrevive_a_zerar_e_reabrir_a_posicao(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O alvo e da CARTEIRA+ATIVO, nao de um lote especifico. Vender tudo
+        e comprar de novo depois deve encontrar o mesmo alvo -- e a posicao so
+        volta a aparecer no resumo quando a quantidade for maior que zero de
+        novo, entao e nesse momento que o alvo reaparece junto."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(price="20.00"), headers=h)
+        await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=h,
+        )
+
+        # Zera a posicao -- ela some do resumo, mas o alvo continua no banco.
+        await client.post(
+            "/transactions",
+            json=op(side="venda", price="25.00", traded_at="2026-02-01"),
+            headers=h,
+        )
+        resumo_zerado = await client.get("/portfolio/summary", headers=h)
+        assert resumo_zerado.json()["positions"] == []
+
+        # Recompra: a posicao reaparece, e o alvo com ela.
+        await client.post(
+            "/transactions", json=op(price="30.00", traded_at="2026-03-01"), headers=h
+        )
+        resumo = await client.get("/portfolio/summary", headers=h)
+        alvo = resumo.json()["positions"][0]["alvo"]
+        assert alvo["stop_gain_tipo"] == "preco"
+        assert Decimal(alvo["stop_gain_valor"]) == Decimal("45.00")
+
+
+class TestIsolamento:
+    """A classe mais importante do arquivo -- mesmo motivo de
+    `test_transactions.py::TestIsolamentoEntreUsuarios`."""
+
+    async def test_alvo_de_um_usuario_nao_aparece_para_outro(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, dono = await usuario_logado(client)
+        outro = await segunda_conta(client)
+
+        await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=dono,
+        )
+        await client.post("/transactions", json=op(price="20.00"), headers=outro)
+
+        resumo_de_outro = await client.get("/portfolio/summary", headers=outro)
+        alvo = resumo_de_outro.json()["positions"][0]["alvo"]
+        assert alvo["status"] == "sem_alvo"
+
+    async def test_nao_define_alvo_na_carteira_alheia(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, dono = await usuario_logado(client)
+        outro = await segunda_conta(client)
+        carteira_do_dono = (await client.get("/portfolios", headers=dono)).json()[0]["id"]
+
+        resp = await client.put(
+            f"/portfolio/targets/PETR4?portfolio_id={carteira_do_dono}",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=outro,
+        )
+
+        # 404, nao 403: `CarteiraAtual` nao encontra a carteira de outro
+        # usuario -- o mesmo portao unico que protege toda leitura e escrita.
+        assert resp.status_code == 404
+
+    async def test_alvo_e_por_carteira_nao_por_usuario(
+        self, client: AsyncClient, db: AsyncSession, provedor: ProvedorFake
+    ) -> None:
+        """O mesmo ticker em duas carteiras do MESMO usuario tem alvos
+        independentes -- e o ponto de o alvo ser por (carteira, ativo)."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        sim = (
+            await client.post("/portfolios", json={"nome": "Sim", "tipo": "simulada"}, headers=h)
+        ).json()
+
+        await client.post("/transactions", json=op(price="20.00"), headers=h)  # vai para a real
+        await client.post(
+            f"/transactions?portfolio_id={sim['id']}", json=op(price="20.00"), headers=h
+        )
+        await client.put(
+            "/portfolio/targets/PETR4",
+            json={"stop_gain_tipo": "preco", "stop_gain_valor": "45.00"},
+            headers=h,
+        )
+
+        resumo_sim = await client.get(f"/portfolio/summary?portfolio_id={sim['id']}", headers=h)
+        alvo_sim = resumo_sim.json()["positions"][0]["alvo"]
+        assert alvo_sim["status"] == "sem_alvo"
+
+
+class TestExigeAutenticacao:
+    async def test_put_exige_autenticacao(self, client: AsyncClient) -> None:
+        assert (await client.put("/portfolio/targets/PETR4", json={})).status_code == 401
+
+    async def test_delete_exige_autenticacao(self, client: AsyncClient) -> None:
+        assert (await client.delete("/portfolio/targets/PETR4")).status_code == 401
