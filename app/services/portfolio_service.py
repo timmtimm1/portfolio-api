@@ -82,6 +82,7 @@ async def resumo(
                 valor_atual=(
                     posicao.quantidade * cotacao.preco if cotacao else posicao.custo_total
                 ),
+                quantidade=posicao.quantidade,
             ),
         )
         total_custo += posicao.custo_total
@@ -124,5 +125,4 @@ async def resumo(
             ),
         ),
         sem_cotacao=sem_cotacao,
-        meta=target_service.da_carteira(carteira, valor_mercado=total_mercado, alvos=alvos),
     )

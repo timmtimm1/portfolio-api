@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_serializer
 
-from app.schemas.target import AlvoResumo, MetaDaCarteira
+from app.schemas.target import AlvoResumo
 from app.schemas.transaction import _dinheiro, _enxuto
 
 
@@ -96,7 +96,6 @@ class PortfolioTotals(BaseModel):
 class PortfolioSummary(BaseModel):
     positions: list[PositionSummary]
     totals: PortfolioTotals
-    meta: MetaDaCarteira
     # Transparencia deliberada: o cliente precisa saber que estes papeis entraram
     # nos totais apenas pelo custo, sem preco de mercado. Esconder isso faria a
     # rentabilidade parecer pior do que e, sem explicacao.

@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.asset import Asset
 from app.models.portfolio import Portfolio
 from app.models.target import AssetTarget, TipoAlvo
-from app.schemas.target import AlvoResumo, MetaDaCarteira, MetaResumo
-from app.services import target
+from app.schemas.target import AlvoResumo, MetaResumo, TradePlano
+from app.services import target, trade
 
 
 async def definir(
@@ -118,6 +118,7 @@ def resumo_de(
     preco_medio: Decimal,
     preco_atual: Decimal | None,
     valor_atual: Decimal = Decimal(0),
+    quantidade: Decimal = Decimal(0),
 ) -> AlvoResumo:
     """Traduz o model (ou a ausencia dele) para o schema exposto pela API.
 
@@ -137,7 +138,57 @@ def resumo_de(
         stop_loss_valor=alvo.stop_loss_valor,
         status=status,
         meta=_meta_resumo(progresso),
+        fixado_no_trade=alvo.fixado_no_trade,
+        trade=_trade_plano(quantidade, preco_medio, preco_atual),
     )
+
+
+def _trade_plano(
+    quantidade: Decimal, preco_medio: Decimal, preco_atual: Decimal | None
+) -> TradePlano | None:
+    """O plano PADRAO: recuperar o custo, sem lucro extra.
+
+    O "e se eu quisesse tirar R$ 500?" e interativo e roda na tela; aqui fica
+    o caso de partida, que e o que a area de trade mostra sem ninguem digitar
+    nada.
+    """
+    if preco_atual is None:
+        return None
+    plano = trade.planejar(quantidade=quantidade, preco_medio=preco_medio, preco_atual=preco_atual)
+    if plano is None:
+        return None
+    return TradePlano(
+        vender=plano.vender,
+        residuo=plano.residuo,
+        recebe=plano.recebe,
+        custo_recuperado=plano.custo_recuperado,
+        sobra_em_caixa=plano.sobra_em_caixa,
+        residuo_valor=plano.residuo_valor,
+        viavel=plano.viavel,
+    )
+
+
+async def fixar_no_trade(
+    db: AsyncSession, carteira: Portfolio, asset_id: uuid.UUID, *, fixado: bool
+) -> None:
+    """Marca (ou solta) o papel na area de trade.
+
+    Upsert, e nao UPDATE: fixar um papel que nunca teve alvo nenhum e o caso
+    comum -- "vou vender esta" nao pressupoe ter configurado stop antes.
+    """
+    stmt = insert(AssetTarget).values(
+        portfolio_id=carteira.id,
+        asset_id=asset_id,
+        user_id=carteira.user_id,
+        fixado_no_trade=fixado,
+    )
+    await db.execute(
+        stmt.on_conflict_do_update(
+            index_elements=[AssetTarget.portfolio_id, AssetTarget.asset_id],
+            set_={"fixado_no_trade": stmt.excluded.fixado_no_trade},
+        )
+    )
+    await db.commit()
 
 
 def _meta_resumo(progresso: target.ProgressoDaMeta | None) -> MetaResumo | None:
@@ -149,22 +200,4 @@ def _meta_resumo(progresso: target.ProgressoDaMeta | None) -> MetaResumo | None:
         falta=progresso.falta,
         progresso=progresso.progresso,
         atingida=progresso.atingida,
-    )
-
-
-def da_carteira(
-    carteira: Portfolio, *, valor_mercado: Decimal, alvos: dict[str, AssetTarget]
-) -> MetaDaCarteira:
-    """Consolida a meta da carteira inteira.
-
-    `soma_das_metas` percorre os alvos, nao as posicoes: uma meta definida
-    para um papel que ainda nao foi comprado continua sendo dinheiro
-    planejado, e some da conta se so olhassemos o que ja esta na carteira.
-    """
-    soma = sum((a.meta_valor for a in alvos.values() if a.meta_valor is not None), Decimal(0))
-    progresso = target.progresso_da_meta(valor_mercado, carteira.meta_valor)
-    return MetaDaCarteira(
-        progresso=_meta_resumo(progresso),
-        soma_das_metas=soma,
-        nao_distribuido=carteira.meta_valor - soma if carteira.meta_valor is not None else None,
     )

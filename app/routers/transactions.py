@@ -22,7 +22,7 @@ from app.schemas.dividend import (
     DividendSyncResult,
 )
 from app.schemas.portfolio import PortfolioSummary
-from app.schemas.target import AlvoResumo, MetaDaCarteira, PortfolioGoalSet, TargetSet
+from app.schemas.target import AlvoResumo, TargetSet, TradePin
 from app.schemas.transaction import (
     PositionRead,
     TransactionCreate,
@@ -285,32 +285,19 @@ async def definir_alvo(
 
 
 @router.put(
-    "/portfolio/goal",
-    response_model=MetaDaCarteira,
-    summary="Define a meta de patrimonio da carteira inteira",
+    "/portfolio/trade/{ticker}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Fixa ou solta um papel na area de trade",
 )
-async def definir_meta_da_carteira(
-    carteira: CarteiraAtual,
-    db: DbDep,
-    provedor: ProvedorDep,
-    settings: SettingsDep,
-    dados: PortfolioGoalSet,
-) -> MetaDaCarteira:
-    """Meta do patrimonio total, independente das metas por ativo.
-
-    Sao duas coisas de proposito: a diferenca entre a meta geral e a soma das
-    metas por papel e justamente o que ainda nao tem destino definido -- e o
-    resumo devolve essa diferenca em `nao_distribuido`.
-
-    `valor: null` remove a meta.
-    """
-    carteira.meta_valor = dados.valor
-    await db.commit()
-
-    resumo = await portfolio_service.resumo(
-        db, provedor, carteira, ttl_segundos=settings.QUOTE_TTL_SECONDS
-    )
-    return resumo.meta
+async def fixar_no_trade(carteira: CarteiraAtual, db: DbDep, ticker: str, dados: TradePin) -> None:
+    """A area de trade lista sozinha quem bateu ou esta perto do alvo. Isto e
+    para o caso contrario: o papel que a pessoa decidiu vender por um motivo
+    que o app nao tem como saber."""
+    ticker = ticker.strip().upper()
+    ativo = await asset_service.buscar_por_ticker(db, ticker)
+    if ativo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ativo nao encontrado")
+    await target_service.fixar_no_trade(db, carteira, ativo.id, fixado=dados.fixado)
 
 
 @router.delete(

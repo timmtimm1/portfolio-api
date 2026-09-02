@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import enum
 import uuid
-from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, coluna_enum
@@ -32,7 +31,6 @@ class Portfolio(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         # Usuarios diferentes podem ter carteiras homonimas, entao a unicidade e
         # por (usuario, nome) -- nao global.
         UniqueConstraint("user_id", "nome", name="uq_portfolios_user_id_nome"),
-        CheckConstraint("meta_valor IS NULL OR meta_valor > 0", name="meta_valor_positiva"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -42,11 +40,6 @@ class Portfolio(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tipo: Mapped[TipoCarteira] = mapped_column(
         coluna_enum(TipoCarteira, length=10), default=TipoCarteira.SIMULADA, nullable=False
     )
-
-    # Meta de patrimonio da carteira inteira, em reais. Independente da soma
-    # das metas por ativo -- e justamente a diferenca entre as duas que diz
-    # quanto do objetivo ainda nao foi distribuido em papel nenhum.
-    meta_valor: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
     def __repr__(self) -> str:
         return f"<Portfolio {self.nome} ({self.tipo})>"

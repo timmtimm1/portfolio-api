@@ -61,12 +61,6 @@ class TargetSet(BaseModel):
         return self
 
 
-class PortfolioGoalSet(BaseModel):
-    """Corpo do `PUT /portfolio/goal`. `valor: null` remove a meta."""
-
-    valor: Annotated[Decimal, Field(gt=0, le=Decimal("1e12"), decimal_places=6)] | None = None
-
-
 class MetaResumo(BaseModel):
     """Progresso em direcao a uma meta de acumulacao, ja calculado.
 
@@ -96,16 +90,29 @@ class AlvoResumo(BaseModel):
     # de valor zero, que o CHECK do banco nem deixa existir.
     meta: MetaResumo | None = None
 
+    # Fixado na area de trade "na mao", alem do que entra sozinho por estar
+    # perto do alvo.
+    fixado_no_trade: bool = False
 
-class MetaDaCarteira(BaseModel):
-    """Meta de patrimonio da carteira inteira.
+    # Plano padrao (recuperar o custo). `None` sem posicao ou sem cotacao.
+    trade: TradePlano | None = None
 
-    `soma_das_metas` e `nao_distribuido` existem por causa da escolha de ter
-    as duas coisas: a meta geral E as por ativo. Sem eles, a pessoa definiria
-    R$ 100 mil na carteira, R$ 20 mil em tres papeis, e nada na tela diria
-    que R$ 40 mil do objetivo ainda nao tem destino.
-    """
 
-    progresso: MetaResumo | None = None
-    soma_das_metas: Decimal
-    nao_distribuido: Decimal | None = None
+class TradePlano(BaseModel):
+    """Plano de trade otimo, ja calculado para o caso padrao: vender o
+    minimo para recuperar o custo, sem lucro extra."""
+
+    vender: int
+    residuo: int
+    recebe: Decimal
+    custo_recuperado: Decimal
+    sobra_em_caixa: Decimal
+    residuo_valor: Decimal
+    viavel: bool
+
+
+class TradePin(BaseModel):
+    """Corpo do `PUT /portfolio/trade/{ticker}`: fixa ou solta o papel na
+    area de trade."""
+
+    fixado: bool

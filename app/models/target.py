@@ -35,7 +35,8 @@ import enum
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric
+import sqlalchemy as sa
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, coluna_enum
@@ -92,6 +93,13 @@ class AssetTarget(Base, TimestampMixin):
     # meta olha o TAMANHO da posicao ("quanto ainda comprar"). Uma pode
     # existir sem a outra.
     meta_valor: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+
+    # Fixado na area de trade "na mao". A area lista sozinha quem bateu ou
+    # esta perto do alvo -- isto e para o caso contrario: o papel que a pessoa
+    # decidiu vender por um motivo que o app nao tem como saber.
+    fixado_no_trade: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa.false(), nullable=False
+    )
 
     __table_args__ = (
         # Tipo e valor andam juntos: um sem o outro e configuracao pela metade
