@@ -28,6 +28,7 @@ from app.schemas.transaction import (
     TransactionCreate,
     TransactionRead,
     TransactionsClearedResult,
+    TransactionUpdate,
 )
 from app.services import (
     asset_service,
@@ -122,6 +123,57 @@ async def obter_transacao(
     transacao = await transaction_service.obter(db, carteira.id, transacao_id)
     if transacao is None:
         raise _NAO_ENCONTRADA
+    return TransactionRead.model_validate(transacao)
+
+
+@router.patch(
+    "/transactions/{transacao_id}",
+    response_model=TransactionRead,
+    summary="Corrige uma operacao ja lancada",
+)
+async def editar_transacao(
+    carteira: CarteiraAtual, db: DbDep, transacao_id: uuid.UUID, dados: TransactionUpdate
+) -> TransactionRead:
+    """Altera os campos enviados e revalida o livro do ativo.
+
+    PATCH e nao PUT: reenviar a operacao inteira para corrigir um digito abre a
+    porta para um campo esquecido no corpo sobrescrever dado bom com o padrao do
+    schema -- a corretagem voltaria a zero, a observacao sumiria. Num livro
+    contabil isso e corrupcao silenciosa, que e o pior tipo.
+
+    409, e nao 422, quando a correcao quebra o livro. O corpo enviado pode estar
+    perfeitamente valido; o que nao fecha e a combinacao dele com as operacoes
+    que ja existem -- que e exatamente o que 409 (conflito com o estado atual)
+    descreve. Mesmo criterio de `DELETE /transactions/{transacao_id}`.
+    """
+    existente = await transaction_service.obter(db, carteira.id, transacao_id)
+    if existente is None:
+        raise _NAO_ENCONTRADA
+    # Lido ANTES da edicao: `existente` e o mesmo objeto que o servico altera,
+    # entao depois da chamada `.traded_at` ja seria a data nova.
+    dia_antigo = existente.traded_at
+
+    try:
+        transacao = await transaction_service.atualizar(db, carteira.id, transacao_id, dados)
+    except AtivoNaoEncontradoError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Ativo {dados.ticker} nao existe no catalogo",
+        ) from None
+    except VendaSemPosicaoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Esta correcao deixaria o livro inconsistente. {exc}",
+        ) from None
+    if transacao is None:
+        raise _NAO_ENCONTRADA
+
+    # Refaz o historico a partir do PRIMEIRO dia afetado. Adiantar a data de uma
+    # operacao estraga o passado a partir da data nova; atrasa-la, a partir da
+    # antiga. Reconstruir de uma so das duas deixaria o grafico errado
+    # justamente no intervalo entre elas.
+    await snapshot_service.reconstruir_desde(db, carteira, min(dia_antigo, transacao.traded_at))
+
     return TransactionRead.model_validate(transacao)
 
 
