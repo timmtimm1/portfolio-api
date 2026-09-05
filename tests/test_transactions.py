@@ -508,7 +508,10 @@ class TestEdicao:
         assert resposta.status_code == 200
         assert resposta.json()["price"] == "25"
         p = (await client.get("/portfolio/positions", headers=h)).json()[0]
-        assert p["preco_medio"] == "25.00"
+        # "25" e nao "25.00": `preco_medio` sai pelo `_enxuto`, que corta zeros a
+        # direita. So `custo_total` e `resultado_realizado` passam pelo
+        # `_dinheiro` e ganham os centavos.
+        assert p["preco_medio"] == "25"
         assert p["custo_total"] == "2500.00"
 
     async def test_campo_ausente_nao_e_apagado(self, client: AsyncClient, db: AsyncSession) -> None:
@@ -601,6 +604,39 @@ class TestEdicao:
         posicoes = (await client.get("/portfolio/positions", headers=h)).json()
         assert [p["ticker"] for p in posicoes] == ["VALE3"]
         assert posicoes[0]["quantidade"] == "100"
+
+    async def test_recusa_tirar_do_livro_uma_compra_que_a_venda_usa(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """A correcao e valida no DESTINO e mesmo assim tem que ser recusada.
+
+        Mover a compra de PETR4 para VALE3 monta um livro impecavel em VALE3 --
+        uma compra sozinha. O estrago fica na ORIGEM: PETR4 passa a ter uma
+        venda de 100 sem nenhuma compra antes.
+
+        Este teste existe porque a mutacao "validar so o ativo de destino"
+        sobreviveu aos outros 16. O caminho feliz da troca de ticker nao prova
+        nada sobre a origem: nele o livro antigo fica vazio, e livro vazio
+        fecha.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        await criar_ativo(db, ticker="VALE3")
+        _, h = await usuario_logado(client)
+        compra = (await client.post("/transactions", json=op(ticker="PETR4"), headers=h)).json()
+        await client.post(
+            "/transactions",
+            json=op(ticker="PETR4", side="venda", price="30.00", traded_at="2026-02-10"),
+            headers=h,
+        )
+
+        resposta = await client.patch(
+            f"/transactions/{compra['id']}", json={"ticker": "VALE3"}, headers=h
+        )
+
+        assert resposta.status_code == 409
+        # E nada se moveu: a compra continua em PETR4.
+        intacta = (await client.get(f"/transactions/{compra['id']}", headers=h)).json()
+        assert intacta["ticker"] == "PETR4"
 
     async def test_ticker_minusculo_e_normalizado(
         self, client: AsyncClient, db: AsyncSession
