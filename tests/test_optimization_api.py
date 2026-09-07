@@ -448,6 +448,37 @@ class TestBlackLitterman:
         assert len(corpo["fronteira"]) > 0
         assert corpo["maximo_sharpe"] is not None
 
+    async def test_sem_opiniao_a_carteira_otima_E_a_carteira_de_mercado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """A identidade que define o modelo, e o teste mais forte do arquivo.
+
+        Sem opiniao, mu - rf = delta*Sigma*w. O maximo Sharpe resolve
+        w* ~ Sigma^-1 (mu - rf) = delta * w, que normalizado E o proprio w de
+        mercado. Vale exato, e vale tambem com a covariancia posterior, porque
+        sem opiniao ela e (1+tau)*Sigma e a constante some na normalizacao.
+
+        Uma assercao cobre a cadeia inteira: valor de mercado no banco -> pesos
+        -> delta -> pi -> mu -> otimizador. Errar a ordem dos tickers, a
+        transposicao, o sinal ou a escala em qualquer elo quebra isto. Precisa
+        de teto folgado (1.0) porque a restricao, se apertar, e quem manda.
+        """
+        h = await self._com_valor_de_mercado(
+            client, db, {"PETR4": "300e9", "VALE3": "150e9", "ITUB4": "50e9"}
+        )
+
+        corpo = (
+            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
+        ).json()
+
+        mercado = corpo["equilibrio"]["pesos_mercado"]
+        otima = corpo["maximo_sharpe"]["pesos"]
+        assert mercado["PETR4"] == pytest.approx(0.60)
+        for ticker, peso in mercado.items():
+            assert otima[ticker] == pytest.approx(peso, abs=1e-4), (
+                f"{ticker}: otima {otima[ticker]:.4f} != mercado {peso:.4f}"
+            )
+
     async def test_retorno_esperado_sai_em_retorno_TOTAL(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
