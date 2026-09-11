@@ -648,3 +648,114 @@ class TestPaginacaoDoExtrato:
             "await carregarPaginaDeTransacoes()"
         )
         assert "finally" in handler
+
+
+class TestCadastroComConfirmacao:
+    """O cadastro cadastrava com a senha digitada UMA vez, e ja entrava.
+
+    Um erro de digitacao criava uma conta que ninguem consegue abrir -- e ainda
+    nao existe recuperar senha. Agora a senha e repetida e conferida antes da
+    API, a conta so entra depois do e-mail confirmado, e o link de confirmacao e
+    tratado como a credencial que e.
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return (ESTATICOS / "index.html").read_text(encoding="utf-8")
+
+    def _tag(self, html: str, id_: str) -> str:
+        pos = html.index(f'id="{id_}"')
+        return html[html.rindex("<", 0, pos) : html.index(">", pos)]
+
+    def test_o_campo_de_repetir_senha_nasce_escondido_e_desligado(self) -> None:
+        """Desligado, e nao so escondido: um `required` escondido mas ligado
+        impediria o formulario de ENTRAR de ser enviado, sem mensagem nenhuma."""
+        html = self._html()
+        assert " hidden" in self._tag(html, "campo-senha-confirmacao")
+        assert " disabled" in self._tag(html, "senha-confirmacao")
+
+    def test_o_modo_liga_e_desliga_o_campo_repetido(self) -> None:
+        js = self._js()
+        assert '$("#senha-confirmacao").disabled = !criando' in js
+
+    def test_confere_as_senhas_antes_de_chamar_a_api(self) -> None:
+        js = self._js()
+        corpo = js[js.index("async function criarConta()") :][:1500]
+        assert corpo.index('$("#senha-confirmacao").value') < corpo.index("/auth/register")
+
+    def test_nao_entra_sozinho_depois_de_criar(self) -> None:
+        """Entrar logo apos o cadastro pularia a confirmacao de e-mail inteira."""
+        js = self._js()
+        corpo = js[js.index("async function criarConta()") :][:1500]
+        assert "entrarNoApp" not in corpo
+        assert "requestSubmit" not in js
+
+    def test_login_com_email_nao_confirmado_oferece_reenvio(self) -> None:
+        js = self._js()
+        corpo = js[js.index("async function entrarComSenha()") :][:900]
+        assert "r.status === 403" in corpo
+        assert '$("#btn-reenviar").hidden = false' in corpo
+
+    def test_o_link_usa_fragmento_e_nao_query(self) -> None:
+        js = self._js()
+        corpo = js[js.index("async function tratarLinkDeConfirmacao()") :][:1500]
+        assert "location.hash" in corpo
+        assert 'searchParams.get("confirmar")' not in js
+
+    def test_o_token_sai_da_barra_antes_da_chamada(self) -> None:
+        """Se a rede falhar no meio, o token nao pode ficar no historico."""
+        js = self._js()
+        corpo = js[js.index("async function tratarLinkDeConfirmacao()") :][:1500]
+        assert corpo.index("history.replaceState") < corpo.index("/auth/confirmar")
+
+    def test_o_reenvio_nao_revela_se_a_conta_existe(self) -> None:
+        js = self._js()
+        trecho = js[js.index('$("#btn-reenviar").addEventListener') :][:1600]
+        assert "Se houver uma conta" in trecho
+        assert "não tem cadastro" not in trecho
+
+
+class TestCarteiraSimuladaVisivel:
+    """A carteira simulada existia e ninguem achava.
+
+    Era um "+" de 34 px com a explicacao escondida no `title`, e ele abria um
+    `prompt()` -- que navegador embutido bloqueia em silencio: o clique nao fazia
+    nada. Agora e um botao que diz o que faz e um formulario na propria lateral.
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return (ESTATICOS / "index.html").read_text(encoding="utf-8")
+
+    def test_o_botao_diz_o_que_faz(self) -> None:
+        html = self._html()
+        pos = html.index('id="btn-nova-carteira"')
+        texto = html[html.index(">", pos) + 1 : html.index("</button>", pos)]
+        assert "simulada" in texto.lower()
+
+    def test_nao_usa_prompt(self) -> None:
+        assert "prompt(" not in self._js()
+
+    def test_o_formulario_nasce_escondido(self) -> None:
+        html = self._html()
+        pos = html.index('id="form-nova-carteira"')
+        assert " hidden" in html[html.rindex("<", 0, pos) : html.index(">", pos)]
+
+    def test_cria_como_simulada(self) -> None:
+        js = self._js()
+        trecho = js[js.index('$("#form-nova-carteira").addEventListener') :][:900]
+        assert 'tipo: "simulada"' in trecho
+
+    def test_erro_aparece_no_formulario_e_nao_em_alert(self) -> None:
+        """Nome repetido explicado ao lado do campo, onde a pessoa esta olhando."""
+        js = self._js()
+        trecho = js[js.index('$("#form-nova-carteira").addEventListener') :][:900]
+        assert "erro.textContent = e.message" in trecho
+        assert "alert(" not in trecho
+
+    def test_a_lista_marca_quais_sao_simuladas(self) -> None:
+        assert "(simulada)" in self._js()

@@ -29,10 +29,19 @@
         <button type="button" id="btn-ver-senha" aria-label="Mostrar senha">Mostrar</button>
       </div>
     </label>
+    <!-- So no modo "criar conta". Nasce escondido E desligado: um campo `required`
+         escondido mas ligado impediria o formulario de entrar de ser enviado. -->
+    <label class="campo" id="campo-senha-confirmacao" hidden>
+      <span>Repita a senha</span>
+      <input type="password" id="senha-confirmacao" required disabled autocomplete="new-password" placeholder="••••••••••••">
+    </label>
+    <p class="campo-dica" id="dica-senha" hidden>Mínimo de 12 caracteres, e sem a parte do seu e-mail que vem antes do @.</p>
 
+    <p class="login-aviso" id="login-aviso" role="status" hidden></p>
     <p class="erro" id="login-erro" role="alert" hidden></p>
     <button class="btn btn--primario" type="submit" id="btn-entrar">Entrar</button>
-    <p class="login-rodape">Não tem conta? <button type="button" class="link" id="btn-criar">Criar agora</button></p>
+    <button type="button" class="btn btn--fantasma" id="btn-reenviar" hidden>Reenviar e-mail de confirmação</button>
+    <p class="login-rodape"><span id="login-troca-texto">Não tem conta?</span> <button type="button" class="link" id="btn-criar">Criar agora</button></p>
 
     <!-- Entrada sem cadastro. Fica DEPOIS do formulário e com peso visual menor:
          quem já tem conta veio para entrar, e o caminho principal não pode
@@ -70,7 +79,6 @@
     <p class="lateral-titulo">Carteira</p>
     <div class="seletor-carteira">
       <select id="carteira" aria-label="Carteira ativa"></select>
-      <button type="button" id="btn-nova-carteira" title="Nova carteira simulada">+</button>
       <button type="button" id="btn-apagar-carteira" class="btn-perigo"
               title="Apagar esta carteira" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -80,6 +88,22 @@
         </svg>
       </button>
     </div>
+    <!-- Texto, e nao so "+": o "+" com a explicacao escondida no `title` nao foi
+         reconhecido como "criar carteira simulada". E formulario na propria
+         lateral, e nao `prompt()` -- navegador embutido bloqueia `prompt()` sem
+         avisar, e o clique simplesmente nao fazia nada. -->
+    <button type="button" class="btn btn--fantasma btn--pequeno btn--nova-simulada" id="btn-nova-carteira">+ Nova carteira simulada</button>
+    <form class="form-nova-carteira" id="form-nova-carteira" hidden>
+      <label class="campo">
+        <span>Nome da simulação</span>
+        <input id="nova-carteira-nome" maxlength="60" required autocomplete="off" placeholder="Ex.: Dividendos 2027">
+      </label>
+      <p class="erro" id="nova-carteira-erro" role="alert" hidden></p>
+      <div class="form-acoes">
+        <button type="button" class="btn btn--fantasma btn--pequeno" id="nova-carteira-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn--primario btn--pequeno">Criar</button>
+      </div>
+    </form>
 
     <p class="lateral-titulo">Principal</p>
     <nav class="nav">

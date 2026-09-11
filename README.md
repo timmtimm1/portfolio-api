@@ -81,6 +81,11 @@ make api                    # sobe a API com reload
 Abra **http://localhost:8000/painel/** para a interface, ou
 **http://localhost:8000/docs** para a documentação interativa da API.
 
+**E-mail de confirmação.** O cadastro manda um link, e a conta só entra depois de
+confirmada. Sem SMTP no `.env`, o e-mail é gravado em `var/emails/` como `.eml` —
+abra o arquivo para pegar o link. Para receber de verdade, preencha `SMTP_HOST`,
+`SMTP_USER` e `SMTP_PASSWORD` (no Gmail, com uma senha de app).
+
 ```bash
 make testes      # roda a suíte
 make cobertura   # suíte com relatório de cobertura
@@ -470,7 +475,8 @@ Escrito aqui porque um README que só lista o que funciona conta meia história.
 
 - **Editar transação** — não existe `PUT` nem `PATCH` no app; corrigir um dígito exige
   apagar e lançar de novo
-- **Recuperar e trocar senha** — o auth tem registro, login, refresh, logout e `/me`, e só
+- **Recuperar e trocar senha** — o auth tem registro com confirmação de e-mail, login,
+  refresh, logout e `/me`, e só
 - **Deploy** — o job diário de snapshot depende dele, e por isso os dados param quando
   ninguém roda a carga localmente
 - **Imposto de renda** — deixado de fora conscientemente: é a regra mais fácil de errar,

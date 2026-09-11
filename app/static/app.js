@@ -246,7 +246,9 @@ async function carregarCarteiras() {
   const select = $("#carteira");
   limpar(select);
   for (const c of carteiras) {
-    const opcao = el("option", null, c.nome);
+    // Marca a simulada ja na lista: escolher sem saber qual e dinheiro de verdade
+    // e o erro que este app inteiro nao pode deixar acontecer.
+    const opcao = el("option", null, c.tipo === "simulada" ? `${c.nome} (simulada)` : c.nome);
     opcao.value = c.id;
     if (c.id === carteiraAtiva) opcao.selected = true;
     select.append(opcao);
@@ -346,53 +348,147 @@ $("#btn-demo").addEventListener("click", async () => {
   }
 });
 
+// O mesmo cartao serve para entrar e para criar conta. Um modo so por vez: com os
+// dois botoes lado a lado, "Criar agora" cadastrava com a senha digitada uma vez,
+// sem ninguem conferir se era a senha que a pessoa pretendia.
+let modoLogin = "entrar";
+
+function mostrarErroLogin(texto) {
+  $("#login-aviso").hidden = true;
+  const erro = $("#login-erro");
+  erro.textContent = texto;
+  erro.hidden = false;
+}
+
+function mostrarAvisoLogin(texto) {
+  $("#login-erro").hidden = true;
+  const aviso = $("#login-aviso");
+  aviso.textContent = texto;
+  aviso.hidden = false;
+}
+
+function definirModo(modo) {
+  modoLogin = modo;
+  const criando = modo === "criar";
+  $("#campo-senha-confirmacao").hidden = !criando;
+  // Desligado fora do modo criar: um `required` escondido mas ligado barraria o
+  // envio do formulario de entrar, sem mensagem visivel nenhuma.
+  $("#senha-confirmacao").disabled = !criando;
+  $("#dica-senha").hidden = !criando;
+  $("#senha").autocomplete = criando ? "new-password" : "current-password";
+  $("#btn-entrar").textContent = criando ? "Criar conta" : "Entrar";
+  $("#login-troca-texto").textContent = criando ? "Já tem conta?" : "Não tem conta?";
+  $("#btn-criar").textContent = criando ? "Entrar" : "Criar agora";
+  $("#login-erro").hidden = true;
+  $("#login-aviso").hidden = true;
+  $("#btn-reenviar").hidden = true;
+}
+
+async function entrarComSenha() {
+  const corpo = new URLSearchParams({ username: $("#email").value, password: $("#senha").value });
+  const r = await fetch(`${API}/auth/login`, { method: "POST", body: corpo });
+  if (r.status === 403) {
+    // Senha certa, e-mail ainda nao confirmado. So o dono chega aqui.
+    mostrarErroLogin("Confirme seu e-mail antes de entrar. Não achou o link? Peça outro abaixo.");
+    $("#btn-reenviar").hidden = false;
+    return;
+  }
+  if (!r.ok) throw new Error(await mensagemDeFalha(r));
+  token = (await r.json()).access_token;
+  await entrarNoApp();
+}
+
+async function criarConta() {
+  const email = $("#email").value.trim();
+  // Confere ANTES de chamar a API: conta criada com uma senha digitada errada e
+  // uma conta que ninguem consegue abrir -- e ainda nao existe recuperar senha.
+  if ($("#senha").value !== $("#senha-confirmacao").value) {
+    mostrarErroLogin("As senhas não conferem. Digite a mesma senha nos dois campos.");
+    $("#senha-confirmacao").focus();
+    return;
+  }
+  const r = await fetch(`${API}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: $("#senha").value }),
+  });
+  if (r.status === 409) throw new Error("Este e-mail já tem conta. Use “Entrar”.");
+  if (!r.ok) throw new Error(await mensagemDeFalha(r));
+
+  definirModo("entrar");
+  $("#senha").value = "";
+  $("#senha-confirmacao").value = "";
+  mostrarAvisoLogin(
+    `Conta criada. Enviamos um link de confirmação para ${email}. ` +
+    "Abra o e-mail (confira também o spam) e depois entre aqui.",
+  );
+  $("#btn-reenviar").hidden = false;
+}
+
 $("#form-login").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const erro = $("#login-erro");
-  erro.hidden = true;
+  $("#login-erro").hidden = true;
   const botao = $("#btn-entrar");
+  const criando = modoLogin === "criar";
   botao.disabled = true;
-  botao.textContent = "Entrando…";
+  botao.textContent = criando ? "Criando…" : "Entrando…";
   try {
-    const corpo = new URLSearchParams({ username: $("#email").value, password: $("#senha").value });
-    const r = await fetch(`${API}/auth/login`, { method: "POST", body: corpo });
-    if (!r.ok) throw new Error(await mensagemDeFalha(r));
-    token = (await r.json()).access_token;
-    await entrarNoApp();
+    if (criando) await criarConta();
+    else await entrarComSenha();
   } catch (e) {
-    erro.textContent = e.message;
-    erro.hidden = false;
+    mostrarErroLogin(e.message);
   } finally {
     botao.disabled = false;
-    botao.textContent = "Entrar";
+    botao.textContent = modoLogin === "criar" ? "Criar conta" : "Entrar";
   }
 });
 
 $("#btn-ver-senha").addEventListener("click", () => {
   const campo = $("#senha");
   const visivel = campo.type === "text";
-  campo.type = visivel ? "password" : "text";
+  // Os dois campos juntos: mostrar so um faria a pessoa comparar uma senha
+  // visivel com bolinhas -- justamente a comparacao que o campo repetido existe
+  // para permitir.
+  for (const id of ["#senha", "#senha-confirmacao"]) $(id).type = visivel ? "password" : "text";
   $("#btn-ver-senha").textContent = visivel ? "Mostrar" : "Ocultar";
   campo.focus();
 });
 
-$("#btn-criar").addEventListener("click", async () => {
-  const erro = $("#login-erro");
-  erro.hidden = true;
+$("#btn-criar").addEventListener("click", () => {
+  definirModo(modoLogin === "entrar" ? "criar" : "entrar");
+  $(modoLogin === "criar" && $("#email").value ? "#senha" : "#email").focus();
+});
+
+$("#btn-reenviar").addEventListener("click", async () => {
+  const email = $("#email").value.trim();
+  if (!email) {
+    mostrarErroLogin("Digite o e-mail da conta para receber um link novo.");
+    $("#email").focus();
+    return;
+  }
+  const botao = $("#btn-reenviar");
+  botao.disabled = true;
   try {
-    const r = await fetch(`${API}/auth/register`, {
+    const r = await fetch(`${API}/auth/confirmacao/reenviar`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: $("#email").value, password: $("#senha").value }),
+      body: JSON.stringify({ email }),
     });
-    if (!r.ok) {
-      if (r.status === 409) throw new Error("Este e-mail já tem conta. Basta entrar.");
-      throw new Error(await mensagemDeFalha(r));
+    if (r.status === 429) {
+      mostrarErroLogin("Muitos pedidos de reenvio. Tente de novo mais tarde.");
+      return;
     }
-    $("#form-login").requestSubmit();
+    if (!r.ok) throw new Error(await mensagemDeFalha(r));
+    // Mesma frase exista a conta ou nao: dizer "este e-mail nao tem cadastro"
+    // transformaria o botao num jeito de descobrir quem usa o app.
+    mostrarAvisoLogin(
+      "Se houver uma conta aguardando confirmação para este e-mail, enviamos um link novo. " +
+      "Confira também o spam.",
+    );
   } catch (e) {
-    erro.textContent = e.message;
-    erro.hidden = false;
+    mostrarErroLogin(e.message);
+  } finally {
+    botao.disabled = false;
   }
 });
 
@@ -2603,8 +2699,45 @@ document.addEventListener("click", (ev) => {
 
 // Retoma a sessão pelo cookie httpOnly: se ele existir e for válido, o usuário
 // entra direto. É o que torna possível não guardar nada em localStorage.
-renovar()
-  .then((ok) => (ok ? entrarNoApp() : mostrarLogin()))
+// Link de confirmacao: `#confirmar=<token>`. Fragmento, e nao query, porque o
+// navegador nunca manda o fragmento ao servidor -- o token nao cai em log de
+// acesso nenhum. Devolve true quando havia um link para tratar.
+async function tratarLinkDeConfirmacao() {
+  const achado = location.hash.match(/^#confirmar=([A-Za-z0-9_-]+)$/);
+  if (!achado) return false;
+
+  // Sai da barra de endereco ANTES da chamada. Se a rede falhar no meio, o token
+  // nao fica exposto no historico, num favorito ou num print da tela.
+  history.replaceState(null, "", location.pathname + location.search);
+  mostrarLogin();
+  definirModo("entrar");
+  try {
+    const r = await fetch(`${API}/auth/confirmar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: achado[1] }),
+    });
+    if (r.ok) {
+      $("#email").value = (await r.json()).email;
+      mostrarAvisoLogin("E-mail confirmado. Agora é só entrar com a sua senha.");
+      $("#senha").focus();
+    } else if (r.status === 429) {
+      mostrarErroLogin("Muitas tentativas agora há pouco. Aguarde um minuto e abra o link de novo.");
+    } else {
+      mostrarErroLogin("Este link de confirmação é inválido ou expirou. Digite seu e-mail e peça um novo.");
+      $("#btn-reenviar").hidden = false;
+    }
+  } catch {
+    mostrarErroLogin("Não foi possível confirmar agora. Tente abrir o link de novo.");
+  }
+  return true;
+}
+
+tratarLinkDeConfirmacao()
+  .then((tratou) => {
+    if (tratou) return;
+    return renovar().then((ok) => (ok ? entrarNoApp() : mostrarLogin()));
+  })
   .catch(mostrarLogin);
 
 
@@ -2681,18 +2814,38 @@ $("#btn-apagar-carteira").addEventListener("click", async () => {
   }
 });
 
-$("#btn-nova-carteira").addEventListener("click", async () => {
-  const nome = prompt("Nome da carteira simulada:");
-  if (!nome?.trim()) return;
+$("#btn-nova-carteira").addEventListener("click", () => {
+  const form = $("#form-nova-carteira");
+  form.hidden = !form.hidden;
+  $("#nova-carteira-erro").hidden = true;
+  if (!form.hidden) {
+    $("#nova-carteira-nome").value = "";
+    $("#nova-carteira-nome").focus();
+  }
+});
+
+$("#nova-carteira-cancelar").addEventListener("click", () => {
+  $("#form-nova-carteira").hidden = true;
+});
+
+$("#form-nova-carteira").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const erro = $("#nova-carteira-erro");
+  erro.hidden = true;
+  const nome = $("#nova-carteira-nome").value.trim();
+  if (!nome) return;
   try {
     const nova = await api("/portfolios", {
       method: "POST",
-      body: JSON.stringify({ nome: nome.trim(), tipo: "simulada" }),
+      body: JSON.stringify({ nome, tipo: "simulada" }),
     });
+    $("#form-nova-carteira").hidden = true;
     carteiraAtiva = nova.id;
     invalidar();
     await carregarCarteiras();
   } catch (e) {
-    alert(e.message);
+    // Nome repetido e limite de carteiras chegam aqui com a explicacao da API.
+    erro.textContent = e.message;
+    erro.hidden = false;
   }
 });

@@ -11,3 +11,6 @@ htmlcov/
 
 # Logs locais de scripts (cron, backfill) -- nunca dado que se versiona
 logs/
+
+# E-mails gravados localmente quando nao ha SMTP (app/clients/correio.py)
+var/

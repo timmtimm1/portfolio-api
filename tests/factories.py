@@ -32,12 +32,25 @@ def email_unico(prefixo: str = "user") -> str:
 
 
 async def criar_usuario(
-    client: AsyncClient, email: str | None = None, senha: str = SENHA_PADRAO
+    client: AsyncClient,
+    email: str | None = None,
+    senha: str = SENHA_PADRAO,
+    *,
+    confirmar: bool = True,
 ) -> tuple[str, str]:
-    """Cadastra e devolve (email, senha)."""
+    """Cadastra, confirma o e-mail pelo fluxo real e devolve (email, senha).
+
+    Confirmar pelo LINK -- e nao marcando a coluna direto no banco -- faz cada um
+    dos testes que cria usuario exercitar a confirmacao de graca. Se o fluxo
+    quebrar, a suite inteira avisa, e nao so o arquivo dele.
+    """
     email = email or email_unico()
     resp = await client.post("/auth/register", json={"email": email, "password": senha})
     assert resp.status_code == 201, resp.text
+    if confirmar:
+        token = client.caixa.token_para(email)  # type: ignore[attr-defined]
+        conf = await client.post("/auth/confirmar", json={"token": token})
+        assert conf.status_code == 200, conf.text
     return email, senha
 
 

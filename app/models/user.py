@@ -61,12 +61,30 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # demonstracao" deixa uma conta, uma carteira, transacoes e snapshots.
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
+    # --- Confirmacao de e-mail -----------------------------------------------
+    #
+    # Quando a pessoa provou que o e-mail e dela. Nulo = conta criada e ainda nao
+    # confirmada, e o login fica bloqueado ate o link ser aberto.
+    #
+    # Data, e nao booleano: "confirmou em 11/09" responde a pergunta de suporte
+    # "quando isso aconteceu?", que um `True` apaga. As contas anteriores a esta
+    # coluna nasceram confirmadas na migration -- elas se cadastraram quando nao
+    # havia o que confirmar, e bloquea-las agora seria trancar gente do lado de
+    # fora.
+    email_confirmado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
     @property
     def expirou(self) -> bool:
         """Conta de verdade nunca expira; demo expira na hora marcada."""
         if self.expires_at is None:
             return False
         return datetime.now(UTC) >= self.expires_at
+
+    @property
+    def email_confirmado(self) -> bool:
+        return self.email_confirmado_em is not None
 
     def __repr__(self) -> str:
         # Nao inclui o hash da senha. `repr()` de model aparece em log de erro e

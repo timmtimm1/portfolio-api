@@ -86,6 +86,24 @@ covariância, e média histórica por ativo tem erro-padrão enorme — a cartei
   aplicada pela metade: zerar o coeficiente ausente transforma "PETR4 supera
   VALE3 em 3 pontos" em "PETR4 rende 3%".
 
+## Cadastro e e-mail
+
+- **Login exige e-mail confirmado.** O cadastro manda um link de uso único
+  (24 h). `autenticar` recusa com `EmailNaoConfirmadoError` (403) **depois** de
+  conferir a senha — antes disso, viraria oráculo de quem tem conta pendente.
+- **O token vai no fragmento** (`/painel/#confirmar=…`), nunca na query: o
+  fragmento não chega ao servidor nem aos logs. O JS tira o token da barra de
+  endereço antes de chamar a API.
+- **O e-mail sai por `BackgroundTasks`** — SMTP fora do ar não derruba o
+  cadastro —, e o reenvio responde sempre igual (202), exista a conta ou não.
+- **Sem `SMTP_HOST`, fora de produção o e-mail vira `.eml` em `var/emails`**, e o
+  link não vai para o log. Em produção a aplicação não sobe sem SMTP, com
+  `SMTP_TLS=nenhum` ou com `APP_URL` apontando para localhost.
+- Nos testes, `criar_usuario` confirma pelo **link real**, lido da
+  `CaixaDeEmailFake` do `conftest`; `confirmar=False` cria conta pendente.
+- Contas anteriores à coluna `email_confirmado_em` nasceram confirmadas na
+  migration `3621b2863c09`.
+
 ## Migrations
 
 - `make migration` (o autogenerate cru emite linhas de 140 chars e o lint reprova).
@@ -106,6 +124,11 @@ falhar não prova nada — já houve quatro testes vacuosos pegos assim.
 Para desfazer uma mutação, use **cópia de backup**, nunca `git checkout` num
 arquivo com trabalho não commitado (isso já apagou uma feature inteira aqui).
 
+Para conferir log num teste, pendure um handler no logger do módulo, e não use
+`caplog`: `configurar()` troca os handlers da raiz quando o app é criado. E o
+`migrations/env.py` usa `disable_existing_loggers=False` porque a suíte roda as
+migrations no mesmo processo — com o padrão, todo logger do app ficava mudo.
+
 ## Ao trabalhar com o app rodando
 
 **Nunca escreva dados de teste na conta real** (`bernardo@exemplo.com`). Use a
@@ -120,7 +143,7 @@ Não digite senhas em formulários; peça para o Bernardo fazer esse passo.
 Feito: auth (JWT + refresh com detecção de reuso), carteiras real/simuladas,
 transações, cotações com cache, proventos, desdobramentos, snapshots,
 fronteira eficiente (Black-Litterman), rebalanceamento, Monte Carlo, observabilidade
-(JSON logs + Prometheus), conta demo de 2h, alvos (stop gain/loss + meta de
+(JSON logs + Prometheus), conta demo de 2h, confirmação de e-mail no cadastro, carteira simulada na lateral, alvos (stop gain/loss + meta de
 acumulação), área de trade (trade ótimo).
 
 Pendente: **deploy** (adiado de propósito), editar transação (não existe

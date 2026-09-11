@@ -21,6 +21,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,10 @@ async def test_cadastro_e_login_calculam_o_hash_no_pool_dedicado(
         monkeypatch.setattr(security, nome, espiao)
 
     usuario = await auth_service.criar_usuario(db, UserCreate(email=email_unico(), password=SENHA))
+    # O teste e sobre EM QUE THREAD o hash roda, nao sobre confirmacao de e-mail:
+    # a conta entra confirmada para o login chegar ate o fim.
+    usuario.email_confirmado_em = datetime.now(UTC)
+    await db.commit()
     await auth_service.autenticar(db, usuario.email, SENHA)
     with pytest.raises(CredenciaisInvalidasError):
         await auth_service.autenticar(db, email_unico("ninguem"), SENHA)
