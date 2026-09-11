@@ -180,11 +180,11 @@ class OptimizationResponse(BaseModel):
 
     aviso: str = Field(
         default=(
-            "Retorno esperado por Black-Litterman: parte do equilibrio implicito nos "
-            "pesos de mercado e incorpora as opinioes informadas. A covariancia vem do "
-            "historico observado, e o premio de risco do mercado tambem -- desempenho "
-            "passado nao garante desempenho futuro. As opinioes sao suas: o modelo "
-            "propaga o que voce afirmou, nao verifica. Isto nao e recomendacao de "
+            "Retorno esperado por Black-Litterman: parte do equilíbrio implícito nos "
+            "pesos de mercado e incorpora as opiniões informadas. A covariância vem do "
+            "histórico observado, e o prêmio de risco do mercado também -- desempenho "
+            "passado não garante desempenho futuro. As opiniões são suas: o modelo "
+            "propaga o que você afirmou, não verifica. Isto não é recomendação de "
             "investimento."
         ),
         description="Limitacao do modelo, devolvida sempre",
