@@ -117,7 +117,7 @@ covariância, e média histórica por ativo tem erro-padrão enorme — a cartei
 
 ## Testes
 
-657 testes. A disciplina é **teste de mutação**: depois de escrever um teste,
+774 testes. A disciplina é **teste de mutação**: depois de escrever um teste,
 quebre o código de propósito e confirme que ele falha. Teste que não sabe
 falhar não prova nada — já houve quatro testes vacuosos pegos assim.
 
@@ -141,15 +141,17 @@ Não digite senhas em formulários; peça para o Bernardo fazer esse passo.
 ## Estado atual
 
 Feito: auth (JWT + refresh com detecção de reuso), carteiras real/simuladas,
-transações, cotações com cache, proventos, desdobramentos, snapshots,
+transações (com edição via PATCH), cotações com cache, proventos, desdobramentos, snapshots,
 fronteira eficiente (Black-Litterman), rebalanceamento, Monte Carlo, observabilidade
 (JSON logs + Prometheus), conta demo de 2h, confirmação de e-mail no cadastro, carteira simulada na lateral, alvos (stop gain/loss + meta de
 acumulação), área de trade (trade ótimo).
 
-Pendente: **deploy** (adiado de propósito), editar transação (não existe
-PUT/PATCH), recuperar senha, PWA para celular. Imposto de renda foi excluído
-deliberadamente — modelar IR exigiria somar vendas do mês, prejuízo acumulado
-e tipo de operação; número fiscal quase certo é pior que nenhum.
+Pendente: **deploy** (adiado de propósito — agora também depende de SMTP e de
+um `APP_URL` público, por causa da confirmação de e-mail), recuperar senha,
+PWA para celular (o botão "Sair" some em telas ≤860px, precisa de correção).
+Imposto de renda foi excluído deliberadamente — modelar IR exigiria somar
+vendas do mês, prejuízo acumulado e tipo de operação; número fiscal quase
+certo é pior que nenhum.
 
 Dados de mercado vêm do repo irmão `~/Projects/mercado_financeiro` via CSV,
 carregados por cron (ver `scripts/atualizar_historico.sh`).
