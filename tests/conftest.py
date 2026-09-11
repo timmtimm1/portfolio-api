@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E4
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
 from app.clients import get_provedor_de_cotacoes  # noqa: E402
+from app.clients.correio import Email, get_enviador_de_email  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_db  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -135,8 +136,45 @@ def provedor() -> ProvedorFake:
     return ProvedorFake()
 
 
+class CaixaDeEmailFake:
+    """Duble do enviador de e-mail: guarda o que seria enviado, sem rede.
+
+    Mesma ideia do `ProvedorFake`. Com `falhar`, simula um SMTP fora do ar -- e
+    assim que se prova que a falha no envio nao derruba o cadastro.
+    """
+
+    def __init__(self) -> None:
+        self.enviados: list[Email] = []
+        self.falhar = False
+
+    async def enviar(self, email: Email) -> None:
+        if self.falhar:
+            raise ConnectionError("SMTP fora do ar (simulado)")
+        self.enviados.append(email)
+
+    def para(self, destinatario: str) -> list[Email]:
+        return [e for e in self.enviados if e.para == destinatario.strip().lower()]
+
+    def token_para(self, destinatario: str) -> str:
+        """Token do link do ULTIMO e-mail enviado ao destinatario."""
+        import re
+
+        enviados = self.para(destinatario)
+        assert enviados, f"nenhum e-mail enviado para {destinatario}"
+        achado = re.search(r"#confirmar=([A-Za-z0-9_-]+)", enviados[-1].texto)
+        assert achado, "o e-mail nao tem link de confirmacao"
+        return achado.group(1)
+
+
+@pytest.fixture
+def caixa() -> CaixaDeEmailFake:
+    return CaixaDeEmailFake()
+
+
 @pytest_asyncio.fixture
-async def client(db: AsyncSession, provedor: ProvedorFake) -> AsyncIterator[AsyncClient]:
+async def client(
+    db: AsyncSession, provedor: ProvedorFake, caixa: CaixaDeEmailFake
+) -> AsyncIterator[AsyncClient]:
     """Cliente HTTP que fala com a aplicacao em memoria, sem porta de rede.
 
     `ASGITransport` chama a aplicacao direto. Nao ha servidor, nao ha socket, nao
@@ -149,8 +187,12 @@ async def client(db: AsyncSession, provedor: ProvedorFake) -> AsyncIterator[Asyn
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_provedor_de_cotacoes] = lambda: provedor
+    app.dependency_overrides[get_enviador_de_email] = lambda: caixa
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test/api/v1") as ac:
+        # A caixa viaja junto do cliente para a fabrica `criar_usuario` achar o
+        # link de confirmacao sem mudar a assinatura de centenas de testes.
+        ac.caixa = caixa  # type: ignore[attr-defined]
         yield ac
 
 

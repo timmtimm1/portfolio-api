@@ -15,7 +15,7 @@ import os
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, computed_field, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -145,6 +145,35 @@ class Settings(BaseSettings):
     # Fica configuravel porque a Selic muda: ajuste no .env conforme o COPOM.
     RISK_FREE_RATE: float = 0.10
 
+    # --- E-mail ----------------------------------------------------------------
+    #
+    # URL publica do painel, usada no link de confirmacao. Em producao TEM que
+    # ser o endereco real (validado abaixo): um link para localhost num e-mail
+    # de verdade e uma conta que nunca confirma.
+    APP_URL: str = "http://localhost:8000"
+
+    # SMTP. Sem SMTP_HOST, fora de producao o e-mail vira um arquivo `.eml` (ver
+    # app/clients/correio.py); em producao a aplicacao se recusa a subir.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: SecretStr | None = None
+    SMTP_TLS: Literal["starttls", "ssl", "nenhum"] = "starttls"
+    SMTP_REMETENTE: str = "Portfolio Tracker <nao-responda@localhost>"
+    EMAIL_PASTA_LOCAL: str = "var/emails"
+
+    # 24 h cobre quem cria a conta a noite e abre o e-mail de manha. Mais que
+    # isso, um link esquecido numa caixa comprometida continua valendo.
+    EMAIL_CONFIRMACAO_VALIDADE_HORAS: int = 24
+
+    # Reenviar e barato para quem abusa e caro para quem recebe: cada chamada
+    # poe um e-mail na caixa de alguem. 3 por hora por IP basta para quem perdeu
+    # o primeiro.
+    RATE_LIMIT_REENVIO_CONFIRMACAO: str = "3/hour"
+    # O token tem 384 bits e nao se adivinha; este limite so impede que a rota
+    # vire alvo de volume.
+    RATE_LIMIT_CONFIRMACAO: str = "30/minute"
+
     # Origens permitidas para CORS. Lista explicita, nunca "*" junto com credenciais.
     #
     # `NoDecode` desliga o parse automatico de JSON que o pydantic-settings faz em
@@ -169,6 +198,24 @@ class Settings(BaseSettings):
         if isinstance(v, str) and not v.startswith("["):
             return [origem.strip() for origem in v.split(",") if origem.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _email_em_producao(self) -> Settings:
+        """Em producao, e-mail tem que sair de verdade, e com criptografia.
+
+        Sem esta trava o app subiria gravando os links de confirmacao em arquivo
+        no servidor: ninguem confirmaria conta nenhuma, e o sintoma seria "o
+        cadastro nao funciona" -- longe da causa.
+        """
+        if self.ENVIRONMENT != "production":
+            return self
+        if not self.SMTP_HOST:
+            raise ValueError("em producao, SMTP_HOST e obrigatorio (confirmacao de e-mail)")
+        if self.SMTP_TLS == "nenhum":
+            raise ValueError("em producao, SMTP_TLS nao pode ser 'nenhum'")
+        if "localhost" in self.APP_URL or "127.0.0.1" in self.APP_URL:
+            raise ValueError("em producao, APP_URL precisa ser o endereco publico do painel")
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -26,7 +26,11 @@ from app.models import Base  # importa todos os models -> popula Base.metadata
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: a suite de testes roda as migrations no
+    # MESMO processo do app (conftest). Com o padrao do fileConfig, todo logger
+    # ja importado -- os do app inclusive -- era desligado ali, e qualquer log
+    # emitido depois disso sumia sem erro nenhum.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option(
     "sqlalchemy.url",

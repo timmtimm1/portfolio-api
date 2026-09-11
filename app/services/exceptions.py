@@ -27,3 +27,12 @@ class CredenciaisInvalidasError(DomainError):
 
 class ContaInativaError(DomainError):
     pass
+
+
+class EmailNaoConfirmadoError(DomainError):
+    """Senha certa, conta ativa, e-mail ainda nao confirmado.
+
+    So e levantada DEPOIS de conferir a senha, como a de conta inativa: quem nao
+    sabe a senha recebe o 401 de sempre e nao descobre que a conta existe. Quem
+    sabe a senha e o dono -- e precisa saber que falta abrir o e-mail.
+    """

@@ -4,19 +4,37 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.security import OAuth2PasswordRequestForm
 
+from app.clients.correio import EnviadorDeEmail, enviar_sem_derrubar, get_enviador_de_email
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbDep, SettingsDep
 from app.core.rate_limit import limiter
-from app.schemas.auth import TokenResponse
+from app.schemas.auth import (
+    ConfirmarEmail,
+    EmailConfirmado,
+    Mensagem,
+    ReenviarConfirmacao,
+    TokenResponse,
+)
 from app.schemas.user import UserCreate, UserRead
-from app.services import auth_service, demo_service, token_service
+from app.services import auth_service, confirmacao_service, demo_service, token_service
+from app.services.confirmacao_service import LinkDeConfirmacaoInvalidoError
 from app.services.exceptions import (
     ContaInativaError,
     CredenciaisInvalidasError,
     EmailJaCadastradoError,
+    EmailNaoConfirmadoError,
 )
 from app.services.token_service import (
     RefreshTokenInvalidoError,
@@ -26,6 +44,11 @@ from app.services.token_service import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE = "refresh_token"  # noqa: S105  (nome do cookie, nao um segredo)
+
+# O enviador chega por dependencia pelo mesmo motivo do provedor de cotacoes: o
+# teste troca por uma caixa em memoria, e nenhuma rota sabe se o e-mail saiu por
+# SMTP ou foi para um arquivo.
+EnviadorDep = Annotated[EnviadorDeEmail, Depends(get_enviador_de_email)]
 
 _CREDENCIAIS_INVALIDAS = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -77,14 +100,22 @@ def _set_refresh_cookie(response: Response, token: str, settings: SettingsDep) -
     summary="Cria uma conta",
 )
 @limiter.limit(get_settings().RATE_LIMIT_REGISTER)
-async def register(request: Request, dados: UserCreate, db: DbDep) -> UserRead:
+async def register(
+    request: Request,
+    dados: UserCreate,
+    db: DbDep,
+    settings: SettingsDep,
+    enviador: EnviadorDep,
+    tarefas: BackgroundTasks,
+) -> UserRead:
     """Cadastro com email e senha.
 
     Compromisso assumido conscientemente: devolver 409 revela que aquele email ja
     tem conta -- e enumeracao de usuarios. Esconder isso exigiria responder 201
     sempre e mandar a informacao real por email, o que so faz sentido com um fluxo
-    de verificacao por email (fora do escopo desta v1). A mitigacao aqui e o rate
-    limit aplicado a esta rota. O login, esse sim, nao vaza nada.
+    de verificacao por email. Esse fluxo agora existe, entao a troca ficou
+    possivel e esta registrada como proximo passo; por ora a mitigacao e o rate
+    limit desta rota. O login, esse sim, nao vaza nada.
     """
     try:
         usuario = await auth_service.criar_usuario(db, dados)
@@ -92,6 +123,16 @@ async def register(request: Request, dados: UserCreate, db: DbDep) -> UserRead:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Email ja cadastrado"
         ) from None
+
+    # O e-mail sai DEPOIS da resposta: um SMTP lento nao segura o cadastro, e um
+    # SMTP fora do ar nao transforma conta criada em 500 -- a pessoa pede o
+    # reenvio na tela de entrada.
+    token = await confirmacao_service.emitir(db, usuario, settings)
+    tarefas.add_task(
+        enviar_sem_derrubar,
+        enviador,
+        confirmacao_service.email_de_confirmacao(usuario.email, token, settings),
+    )
     return UserRead.model_validate(usuario)
 
 
@@ -117,6 +158,13 @@ async def login(
         usuario = await auth_service.autenticar(db, form.username.strip().lower(), form.password)
     except (CredenciaisInvalidasError, ContaInativaError):
         raise _CREDENCIAIS_INVALIDAS from None
+    except EmailNaoConfirmadoError:
+        # 403, e nao 401: a senha estava certa. So o dono chega aqui, e ele
+        # precisa saber que falta abrir o e-mail -- nao tentar a senha de novo.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Confirme seu e-mail para entrar. O link foi enviado no cadastro.",
+        ) from None
 
     access, refresh, expira_em = await token_service.emitir_par(db, usuario, settings)
     _set_refresh_cookie(response, refresh, settings)
@@ -225,3 +273,65 @@ async def demo(
     access, refresh, expira_em = await token_service.emitir_par(db, usuario, settings)
     _set_refresh_cookie(response, refresh, settings)
     return TokenResponse(access_token=access, expires_in=expira_em)
+
+
+@router.post(
+    "/confirmar",
+    response_model=EmailConfirmado,
+    summary="Confirma o e-mail pelo link enviado no cadastro",
+)
+@limiter.limit(get_settings().RATE_LIMIT_CONFIRMACAO)
+async def confirmar_email(
+    request: Request,
+    dados: ConfirmarEmail,
+    db: DbDep,
+) -> EmailConfirmado:
+    """Consome o token do link. NAO autentica: depois de confirmar, a pessoa entra.
+
+    Entrar direto seria confortavel e trocaria as duas provas do fluxo -- saber a
+    senha E ter o e-mail -- por uma so. Quem le a caixa de outra pessoa nao deveria
+    ganhar a sessao dela de brinde.
+    """
+    try:
+        usuario = await confirmacao_service.confirmar(db, dados.token)
+    except LinkDeConfirmacaoInvalidoError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Link de confirmacao invalido ou expirado. Peca um novo na tela de entrada.",
+        ) from None
+    return EmailConfirmado(email=usuario.email)
+
+
+@router.post(
+    "/confirmacao/reenviar",
+    response_model=Mensagem,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Reenvia o link de confirmacao",
+)
+@limiter.limit(get_settings().RATE_LIMIT_REENVIO_CONFIRMACAO)
+async def reenviar_confirmacao(
+    request: Request,
+    dados: ReenviarConfirmacao,
+    db: DbDep,
+    settings: SettingsDep,
+    enviador: EnviadorDep,
+    tarefas: BackgroundTasks,
+) -> Mensagem:
+    """Sempre 202, com a mesma mensagem, exista a conta ou nao.
+
+    Responder "esse e-mail nao tem cadastro" transformaria o reenvio num oraculo
+    de quem usa o app. O envio fica para depois da resposta tambem por isso: o
+    tempo de conversar com o SMTP nao pode denunciar que havia uma conta ali.
+    """
+    token = await confirmacao_service.reenviar(db, dados.email, settings)
+    if token is not None:
+        tarefas.add_task(
+            enviar_sem_derrubar,
+            enviador,
+            confirmacao_service.email_de_confirmacao(dados.email, token, settings),
+        )
+    return Mensagem(
+        mensagem=(
+            "Se houver uma conta aguardando confirmacao para este e-mail, enviamos um link novo."
+        )
+    )

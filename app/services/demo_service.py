@@ -93,6 +93,9 @@ async def criar(db: AsyncSession, *, validade_horas: int) -> User:
         hashed_password=await hash_password_async(secrets.token_urlsafe(32)),
         is_demo=True,
         expires_at=datetime.now(UTC) + timedelta(hours=validade_horas),
+        # Demo nasce confirmada: o e-mail e descartavel e ela nao entra por login
+        # -- os tokens saem direto da rota /auth/demo.
+        email_confirmado_em=datetime.now(UTC),
     )
     db.add(usuario)
     await db.flush()

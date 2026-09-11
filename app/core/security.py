@@ -215,3 +215,21 @@ def hash_refresh_token(token: str) -> str:
     custo sem ganho.
     """
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+# --- Token de confirmacao de e-mail ------------------------------------------
+
+
+def generate_confirmation_token() -> tuple[str, str]:
+    """(token em texto puro, hash para o banco) do link de confirmacao.
+
+    MESMA construcao do refresh token -- 384 bits de `secrets`, SHA-256 no banco
+    --, reaproveitada em vez de reescrita: criptografia duplicada e onde uma das
+    copias fica para tras quando a outra e corrigida.
+    """
+    return generate_refresh_token()
+
+
+def hash_confirmation_token(token: str) -> str:
+    """Hash usado para achar o link no banco. Ver `generate_confirmation_token`."""
+    return hash_refresh_token(token)

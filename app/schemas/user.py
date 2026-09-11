@@ -61,3 +61,7 @@ class UserRead(BaseModel):
     # uma sessao que morre sem aviso.
     is_demo: bool = False
     expires_at: datetime | None = None
+
+    # A interface usa para explicar o que falta. Nao e segredo: so chega aqui
+    # quem acabou de se cadastrar, ou quem ja esta autenticado.
+    email_confirmado: bool = False

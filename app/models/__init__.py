@@ -10,6 +10,7 @@ from app.models.asset import Asset, AssetType, PriceHistory
 from app.models.base import Base
 from app.models.benchmark import BenchmarkRate, Indexador
 from app.models.dividend import Dividend, TipoProvento
+from app.models.email_confirmation import EmailConfirmationToken
 from app.models.portfolio import Portfolio, TipoCarteira
 from app.models.quote import PriceQuote
 from app.models.refresh_token import MotivoRevogacao, RefreshToken
@@ -26,6 +27,7 @@ __all__ = [
     "BenchmarkRate",
     "Base",
     "Dividend",
+    "EmailConfirmationToken",
     "Indexador",
     "PriceHistory",
     "Portfolio",

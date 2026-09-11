@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class TokenResponse(BaseModel):
@@ -14,3 +16,28 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"  # noqa: S105
     expires_in: int  # segundos ate expirar -- o cliente nao deveria ter que
     # decodificar o JWT para saber quando renovar
+
+
+class ConfirmarEmail(BaseModel):
+    # Teto de tamanho ANTES do hash: sem ele, um corpo de megabytes seria
+    # hasheado so para descobrir que nao e token nenhum.
+    token: Annotated[str, Field(min_length=20, max_length=128)]
+
+
+class ReenviarConfirmacao(BaseModel):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def _normaliza(cls, v: str) -> str:
+        """Mesma normalizacao do cadastro. Sem ela, "Bernardo@x.com" nunca acharia
+        a conta gravada como "bernardo@x.com", e o reenvio falharia em silencio."""
+        return v.strip().lower()
+
+
+class EmailConfirmado(BaseModel):
+    email: EmailStr
+
+
+class Mensagem(BaseModel):
+    mensagem: str
