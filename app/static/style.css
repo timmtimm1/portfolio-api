@@ -81,6 +81,13 @@ h1, h2, h3, p { margin: 0; }
 }
 .login-sub { color: var(--txt-2); font-size: 13px; margin-bottom: 6px; }
 .login-rodape { color: var(--txt-3); font-size: 13px; text-align: center; }
+/* Aviso positivo do login (conta criada, e-mail confirmado): verde, para nao ser
+   lido como erro por quem so bate o olho. */
+.login-aviso {
+  color: var(--verde, #4ade80); font-size: 13px; line-height: 1.45;
+  background: rgba(74, 222, 128, .08); border: 1px solid rgba(74, 222, 128, .25);
+  border-radius: var(--r-s); padding: 10px 12px;
+}
 
 .campo { display: grid; gap: 7px; }
 .campo > span { font-size: 12px; color: var(--txt-2); font-weight: 500; }
@@ -224,6 +231,10 @@ h1, h2, h3, p { margin: 0; }
   font-size: 17px; font-weight: 600; line-height: 1;
 }
 .seletor-carteira button:hover { background: rgba(123, 92, 255, .28); }
+.btn--nova-simulada { display: block; width: calc(100% - 8px); margin: 0 4px 10px; text-align: center; }
+.form-nova-carteira { display: grid; gap: 8px; padding: 0 4px 12px; }
+.form-nova-carteira .form-acoes { justify-content: stretch; }
+.form-nova-carteira .form-acoes .btn { flex: 1; }
 /* Simulada em âmbar: a cor sinaliza "isto não é dinheiro seu" antes de a pessoa
    ler o rótulo. Confundir simulação com posição real é o erro que este projeto
    inteiro não pode cometer. */
