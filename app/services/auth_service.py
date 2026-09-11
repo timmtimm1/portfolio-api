@@ -6,7 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password, verify_password, verify_password_dummy
+from app.core.security import (
+    hash_password_async,
+    verify_password_async,
+    verify_password_dummy_async,
+)
 from app.models.user import User
 from app.schemas.user import UserCreate
 from app.services.exceptions import (
@@ -25,7 +29,7 @@ async def criar_usuario(db: AsyncSession, dados: UserCreate) -> User:
     constraint UNIQUE do banco, que e atomica por definicao; o INSERT e tentado e
     o IntegrityError e traduzido.
     """
-    usuario = User(email=dados.email, hashed_password=hash_password(dados.password))
+    usuario = User(email=dados.email, hashed_password=await hash_password_async(dados.password))
     db.add(usuario)
     try:
         await db.commit()
@@ -41,7 +45,7 @@ async def autenticar(db: AsyncSession, email: str, senha: str) -> User:
 
     Tres cuidados, nesta ordem:
 
-    1. Email inexistente ainda paga o custo de um argon2 (`verify_password_dummy`).
+    1. Email inexistente ainda paga o custo de um argon2 (`verify_password_dummy_async`).
        Sem isso o login vira um oraculo: resposta em 1ms = conta nao existe,
        resposta em 50ms = conta existe com senha errada. A mensagem identica nao
        adianta nada se o relogio denuncia.
@@ -56,10 +60,10 @@ async def autenticar(db: AsyncSession, email: str, senha: str) -> User:
     usuario = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     if usuario is None:
-        verify_password_dummy(senha)
+        await verify_password_dummy_async(senha)
         raise CredenciaisInvalidasError
 
-    valida, novo_hash = verify_password(senha, usuario.hashed_password)
+    valida, novo_hash = await verify_password_async(senha, usuario.hashed_password)
     if not valida:
         raise CredenciaisInvalidasError
 
