@@ -2024,6 +2024,32 @@ function desenharMatriz(correlacao) {
 
 $("#btn-otimizar").addEventListener("click", otimizar);
 
+// Explica de onde saiu o equilíbrio DESTA fronteira -- não o texto genérico
+// do método (isso é `r.aviso`), e sim o que aconteceu NESTE cálculo: partiu
+// do mercado de verdade ou caiu para peso igual, e qual aversão ao risco foi
+// usada. Existe porque Black-Litterman é uma caixa-preta se a tela só
+// mostrar a curva (ver `EquilibrioResumo` no backend).
+// Uma casa decimal fixa, em pt-BR ("2,5", nunca "2.5"). `num()` existe pra
+// isto, mas com ate 8 casas soltas -- aqui o delta quase nunca cai redondo, e
+// "2,486731" reportaria falsa precisao numa referencia que e "~2,5" na
+// literatura.
+const numDelta = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+function explicacaoDoEquilibrio(equilibrio) {
+  if (!equilibrio) return "";
+  const partes = [
+    equilibrio.usou_peso_igual
+      ? `Sem valor de mercado para ${equilibrio.sem_valor_de_mercado.join(", ")}, o ponto ` +
+        "de partida usou peso igual entre os ativos em vez dos pesos de mercado."
+      : "O ponto de partida usa os pesos de mercado reais dos ativos.",
+    equilibrio.usou_delta_padrao
+      ? "A aversão ao risco saiu da faixa usual nesta janela e foi travada em " +
+        `${numDelta(equilibrio.aversao_ao_risco)}, a referência da literatura.`
+      : `Aversão ao risco calculada nesta janela: ${numDelta(equilibrio.aversao_ao_risco)}.`,
+  ];
+  return partes.join(" ");
+}
+
 async function otimizar() {
   carregado.fronteira = true;
   const botao = $("#btn-otimizar");
@@ -2037,6 +2063,9 @@ async function otimizar() {
     ultimaOtimizacao = r;
     desenharFronteira(r);
     renderCarteiras(r);
+    // Sem `equilibrio` (fronteira vazia) não há o que explicar.
+    $("#explicacao-modelo").hidden = !r.equilibrio;
+    $("#explicacao-equilibrio").textContent = explicacaoDoEquilibrio(r.equilibrio);
     $("#aviso-modelo").textContent = r.aviso;
     // Recalcular a fronteira invalida o plano anterior: os pesos mudaram.
     $("#reb-resultado").hidden = true;

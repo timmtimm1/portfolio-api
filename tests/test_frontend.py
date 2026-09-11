@@ -565,6 +565,87 @@ class TestRotuloDaSincronizacao:
         assert 'aviso.hidden ? "" : aviso.textContent' in js
 
 
+class TestExplicacaoDoEquilibrio:
+    """`EquilibrioResumo` (pesos de mercado, aversão ao risco, e os dois
+    "caiu para o padrão") chega pronto da API e nunca era lido -- a tela só
+    mostrava `r.aviso`, a limitação genérica do método, igual em toda
+    fronteira calculada. Quem via a carteira "ótima" não tinha como saber se
+    ela partiu do mercado de verdade ou de peso igual porque faltou valor de
+    mercado -- exatamente o que `EquilibrioResumo` existe pra contar (ver o
+    docstring dele no backend).
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text())
+
+    def test_o_cartao_existe_e_comeca_escondido(self) -> None:
+        """Sem `equilibrio` (fronteira vazia) não há o que explicar."""
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="explicacao-modelo"' in html
+        pos = html.index('id="explicacao-modelo"')
+        assert "hidden" in html[max(0, pos - 100) : pos + 50]
+
+    def test_a_visibilidade_segue_o_equilibrio_vir_ou_nao(self) -> None:
+        js = self._js()
+        assert '$("#explicacao-modelo").hidden = !r.equilibrio;' in js
+
+    def test_peso_igual_e_explicado_com_os_tickers_que_faltaram(self) -> None:
+        js = self._js()
+        corpo = js[
+            js.index("function explicacaoDoEquilibrio") : js.index("async function otimizar")
+        ]
+        assert "equilibrio.usou_peso_igual" in corpo
+        assert "equilibrio.sem_valor_de_mercado.join" in corpo, (
+            "sem nomear os ativos, a pessoa nao sabe QUAL papel faltou -- so que algo faltou"
+        )
+
+    def test_delta_padrao_tambem_e_explicado(self) -> None:
+        js = self._js()
+        corpo = js[
+            js.index("function explicacaoDoEquilibrio") : js.index("async function otimizar")
+        ]
+        assert "equilibrio.usou_delta_padrao" in corpo
+        # O valor aparece nos DOIS ramos do ternário -- calculado ou travado
+        # no padrão -- senão um dos dois casos mostra a frase sem o número.
+        assert corpo.count("numDelta(equilibrio.aversao_ao_risco)") == 2, (
+            "o valor usado precisa aparecer nos dois casos -- calculado ou travado no padrao"
+        )
+
+    def test_a_aversao_ao_risco_formata_em_pt_br(self) -> None:
+        """`toFixed(1)` devolveria "2.5" com ponto -- o resto da tela usa
+        vírgula decimal (ver `num`, `pct`, `brl`)."""
+        js = self._js()
+        corpo = js[
+            js.index("function explicacaoDoEquilibrio") : js.index("async function otimizar")
+        ]
+        assert 'v.toLocaleString("pt-BR"' in js
+        assert "const numDelta" in js
+        assert ".toFixed(" not in corpo
+
+    def test_sem_equilibrio_a_funcao_nao_quebra(self) -> None:
+        """`r.equilibrio` é `None` quando a fronteira vem vazia -- a função
+        precisa devolver algo sensato, não estourar em `.usou_peso_igual` de
+        `null`."""
+        js = self._js()
+        corpo = js[
+            js.index("function explicacaoDoEquilibrio") : js.index("async function otimizar")
+        ]
+        guarda = corpo.index("if (!equilibrio) return")
+        primeiro_uso = min(
+            corpo.index("equilibrio.usou_peso_igual"), corpo.index("equilibrio.usou_delta_padrao")
+        )
+        assert guarda < primeiro_uso, (
+            "sem a guarda ANTES de usar `equilibrio.*`, uma fronteira vazia quebra o resto "
+            "do desenho"
+        )
+
+    def test_o_texto_e_atribuido_por_textContent_nao_por_html(self) -> None:
+        js = self._js()
+        assert (
+            '$("#explicacao-equilibrio").textContent = explicacaoDoEquilibrio(r.equilibrio);' in js
+        )
+
+
 class TestTelaDeRebalanceamento:
     """A tela que traduz peso em ordem.
 

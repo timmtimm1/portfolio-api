@@ -141,7 +141,7 @@ class TestResultado:
         ela se baseia -- e no que ela nao se baseia."""
         h = await _carteira_com(client, db, "PETR4", "VALE3", "ITUB4")
         corpo = (await client.post("/portfolio/optimize", json={"pontos": 6}, headers=h)).json()
-        assert "nao e recomendacao de investimento" in corpo["aviso"]
+        assert "não é recomendação de investimento" in corpo["aviso"]
 
 
 class TestCasosDeBorda:
@@ -553,7 +553,7 @@ class TestBlackLitterman:
         ).json()
 
         assert "Black-Litterman" in corpo["aviso"]
-        assert "opinioes sao suas" in corpo["aviso"]
+        assert "opiniões são suas" in corpo["aviso"]
 
 
 class TestValidacaoDasVisoes:
