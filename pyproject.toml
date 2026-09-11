@@ -1,7 +1,7 @@
 [project]
 name = "portfolio-api"
 version = "0.1.0"
-description = "API REST de carteira de investimentos da B3 com otimizacao de Markowitz"
+description = "API REST de carteira de investimentos da B3 com fronteira eficiente e retorno esperado por Black-Litterman"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141",
