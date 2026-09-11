@@ -7,9 +7,12 @@ exatamente o codigo que voce quer testar exaustivamente.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
 import secrets
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -69,6 +72,54 @@ def verify_password_dummy(senha: str) -> None:
     dois casos. Chamada no caminho em que o usuario nao foi encontrado.
     """
     _password_hash.verify(senha, _DUMMY_HASH)
+
+
+# --- Versoes assincronas: as UNICAS que codigo `async` pode chamar ------------
+#
+# O argon2 daqui custa ~80 ms de CPU e 64 MiB por hash, e com parallelism=4 um
+# hash sozinho ja ocupa quatro nucleos. Chamado direto dentro de `async def`, ele
+# congela o event loop pelo tempo inteiro do calculo -- e com o loop parado
+# nenhuma outra requisicao anda, nem o health check. Medido em 11/09/2026 numa
+# maquina de 4 nucleos, mediana de 3 rodadas nas mesmas condicoes: 8 logins
+# simultaneos pararam o loop por 1.138 ms chamados direto, e por 22 ms neste
+# pool (tempo total de 1.138 para 831 ms). Com 4: 415 ms contra 24 ms. Os
+# valores absolutos variam muito entre rodadas; a proporcao, nao.
+#
+# Por que um pool dedicado, e nao `asyncio.to_thread`:
+#   - `to_thread` usa o executor padrao (8 threads nesta maquina). Uma rajada de
+#     logins roda 8 hashes ao mesmo tempo sem ganhar velocidade -- um hash ja
+#     satura os nucleos -- e aloca 64 MiB x 8. O rate limit e por IP; com
+#     alguns IPs, 50 logins simultaneos sao 3 GB. Negacao de servico pela
+#     memoria.
+#   - Um pool de N trabalhadores E o teto: o hash excedente espera na fila do
+#     pool sem segurar thread nem memoria.
+#   - Nao um `asyncio.Semaphore` global: ele se prende ao primeiro event loop que
+#     o usa, e a suite de testes abre um loop por teste.
+_TRABALHADORES_ARGON2 = max(1, (os.cpu_count() or 2) // 2)
+_POOL_ARGON2 = ThreadPoolExecutor(max_workers=_TRABALHADORES_ARGON2, thread_name_prefix="argon2")
+
+
+async def hash_password_async(senha: str) -> str:
+    """`hash_password` fora do event loop, no pool dedicado."""
+    return await asyncio.get_running_loop().run_in_executor(_POOL_ARGON2, hash_password, senha)
+
+
+async def verify_password_async(senha: str, hash_armazenado: str) -> tuple[bool, str | None]:
+    """`verify_password` fora do event loop, no pool dedicado."""
+    return await asyncio.get_running_loop().run_in_executor(
+        _POOL_ARGON2, verify_password, senha, hash_armazenado
+    )
+
+
+async def verify_password_dummy_async(senha: str) -> None:
+    """`verify_password_dummy` fora do event loop -- pela MESMA fila do verify real.
+
+    Isso e parte da defesa de timing, nao detalhe de implementacao. Se o hash
+    descartavel furasse a fila (chamado direto, ou num pool proprio mais
+    folgado), "email inexistente" voltaria a responder mais rapido que "senha
+    errada" justamente sob carga -- que e quando alguem esta enumerando contas.
+    """
+    await asyncio.get_running_loop().run_in_executor(_POOL_ARGON2, verify_password_dummy, senha)
 
 
 def create_token(

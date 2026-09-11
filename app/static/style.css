@@ -489,6 +489,15 @@ h1, h2, h3, p { margin: 0; }
 .tabela td { padding: 12px; border-top: 1px solid var(--borda); white-space: nowrap; }
 .tabela .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tabela tbody tr:hover { background: rgba(255,255,255,.03); }
+
+/* Rodape do extrato: contagem e "Carregar mais". Existe porque a tabela cortada
+   em 100 tinha a mesma cara do livro inteiro. O `display: flex` so e seguro
+   por causa da regra do atributo hidden com !important, no topo do arquivo. */
+.tabela-rodape {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 12px 4px; border-top: 1px solid var(--borda);
+}
+.tabela-contagem { color: var(--txt-3); font-size: 12.5px; }
 .icone-lixeira { color: var(--txt-3); font-size: 15px; }
 .icone-lixeira:hover { color: var(--vermelho); }
 

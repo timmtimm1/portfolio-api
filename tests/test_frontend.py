@@ -566,3 +566,85 @@ class TestTelaDeProjecao:
     def test_aceita_percentual_com_virgula(self) -> None:
         js = _sem_comentarios((ESTATICOS / "app.js").read_text())
         assert "percentualParaFracao" in js
+
+
+class TestPaginacaoDoExtrato:
+    """A tela de Transacoes buscava UMA pagina de 100 e parava ali.
+
+    Com 101 operacoes, a mais antiga simplesmente nao aparecia -- sem aviso,
+    sem contagem, sem botao. A tabela cortada tinha a mesma cara do livro
+    inteiro. Os testes guardam as decisoes que fecham o buraco: dizer quantas
+    de quantas estao na tela, oferecer a proxima pagina so quando o servidor diz
+    que ela existe, recomecar do zero quando o livro muda, e nao deixar resposta
+    atrasada sujar a tabela.
+
+    `encoding="utf-8"` explicito de proposito: sem ele o Windows le com cp1252 e
+    engasga no primeiro acento do app.js.
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return (ESTATICOS / "index.html").read_text(encoding="utf-8")
+
+    def test_nao_para_mais_na_primeira_pagina(self) -> None:
+        js = self._js()
+        assert 'comCarteira("/transactions?limit=100")' not in js, "voltou a buscar uma pagina so"
+        assert "offset=${extrato.carregadas}" in js
+
+    def test_o_rodape_e_o_botao_nascem_escondidos(self) -> None:
+        """Nascer visivel mostraria "Mostrando 0 de 0" por um instante."""
+        html = self._html()
+        for id_ in ("op-rodape", "op-carregar-mais"):
+            pos = html.index(f'id="{id_}"')
+            tag = html[html.rindex("<", 0, pos) : html.index(">", pos)]
+            assert " hidden" in tag, f"#{id_} precisa nascer com hidden"
+
+    def test_o_botao_obedece_o_servidor(self) -> None:
+        """`tem_proxima`, e nao uma conta local de linhas: a conta local erraria
+        justamente quando a deduplicacao pula uma linha."""
+        js = self._js()
+        assert '$("#op-carregar-mais").hidden = !temProxima' in js
+        assert "atualizarRodapeDoExtrato(pagina.tem_proxima)" in js
+
+    def test_diz_quantas_de_quantas_estao_na_tela(self) -> None:
+        js = self._js()
+        trecho = js[js.index("function atualizarRodapeDoExtrato") :][:600]
+        assert "Mostrando" in trecho and "extrato.total" in trecho
+
+    def test_recarregar_recomeca_do_zero(self) -> None:
+        """Remover, registrar e zerar chamam `carregarTransacoes`. Se ela seguisse
+        do offset atual, apagar uma linha da pagina 1 faria a pagina 2 pular uma
+        operacao."""
+        js = self._js()
+        inicio = js.index("async function carregarTransacoes()")
+        fim = js.index("async function carregarPaginaDeTransacoes()")
+        corpo = js[inicio:fim]
+        assert "extrato.carregadas = 0" in corpo
+        assert "extrato.ids = new Set()" in corpo
+        assert 'limpar($("#tabela-operacoes tbody"))' in corpo
+
+    def test_resposta_atrasada_nao_suja_o_extrato_recomecado(self) -> None:
+        """A checagem de geracao precisa vir DEPOIS do await e ANTES de tocar na
+        tabela -- em qualquer outra posicao ela nao protege nada."""
+        js = self._js()
+        assert "extrato.geracao += 1" in js
+        corpo = js[js.index("async function carregarPaginaDeTransacoes()") :][:1200]
+        assert (
+            corpo.index("await api(")
+            < corpo.index("geracao !== extrato.geracao")
+            < corpo.index("corpo.append")
+        )
+
+    def test_nao_desenha_a_mesma_operacao_duas_vezes(self) -> None:
+        assert "extrato.ids.has(t.id)" in self._js()
+
+    def test_o_botao_se_trava_durante_a_busca(self) -> None:
+        """Dois cliques rapidos pediriam o mesmo offset duas vezes."""
+        js = self._js()
+        handler = js[js.index('$("#op-carregar-mais").addEventListener') :][:500]
+        assert handler.index("botao.disabled = true") < handler.index(
+            "await carregarPaginaDeTransacoes()"
+        )
+        assert "finally" in handler

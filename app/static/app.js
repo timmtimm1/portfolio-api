@@ -2324,13 +2324,44 @@ function renderProjecao(r, volatilidade) {
 
 /* ═══ Transações ═══ */
 
-async function carregarTransacoes() {
-  carregado.transacoes = true;
-  const pagina = await api(comCarteira("/transactions?limit=100"));
-  const corpo = $("#tabela-operacoes tbody");
-  limpar(corpo);
+// Pagina do extrato: o teto do servidor (LIMITE_MAXIMO = 100). Quem tem ate
+// 100 operacoes ve exatamente o que via antes; o que muda e que a operacao de
+// numero 101 deixa de sumir em silencio.
+const OPERACOES_POR_PAGINA = 100;
 
-  if (!pagina.items.length) {
+// Estado do extrato na tela. `geracao` sobe a cada recomeco: uma pagina que
+// ainda estava a caminho quando o livro mudou chega com a geracao velha e e
+// descartada, em vez de anexar linhas antigas numa tabela recem-limpa.
+const extrato = { carregadas: 0, total: 0, ids: new Set(), geracao: 0 };
+
+async function carregarTransacoes() {
+  // Sempre do inicio. Toda mudanca no livro -- remover, registrar, zerar --
+  // chama esta funcao, e recomecar do zero e o que evita o deslocamento de
+  // offset: apagada uma linha da primeira pagina, a segunda comecaria uma
+  // linha adiante e pularia exatamente uma operacao.
+  carregado.transacoes = true;
+  extrato.carregadas = 0;
+  extrato.total = 0;
+  extrato.ids = new Set();
+  extrato.geracao += 1;
+  limpar($("#tabela-operacoes tbody"));
+  $("#op-rodape").hidden = true;
+  await carregarPaginaDeTransacoes();
+}
+
+async function carregarPaginaDeTransacoes() {
+  const geracao = extrato.geracao;
+  const caminho = `/transactions?limit=${OPERACOES_POR_PAGINA}&offset=${extrato.carregadas}`;
+  const pagina = await api(comCarteira(caminho));
+  if (geracao !== extrato.geracao) return;
+
+  const corpo = $("#tabela-operacoes tbody");
+  // `carregadas` conta o que o SERVIDOR entregou, e e ela que vira o proximo
+  // offset. A deduplicacao abaixo afeta so o que e desenhado.
+  extrato.carregadas += pagina.items.length;
+  extrato.total = pagina.total;
+
+  if (!pagina.total && !extrato.ids.size) {
     const tr = el("tr");
     const td = el("td", "vazio", "Nenhuma operação registrada.");
     td.colSpan = 7;
@@ -2340,39 +2371,79 @@ async function carregarTransacoes() {
   }
 
   for (const t of pagina.items) {
-    const tr = el("tr");
-    tr.append(el("td", null, dataBR(t.traded_at)));
-    tr.append(el("td", null, t.ticker));
-    const lado = el("td");
-    lado.append(el("span", `pilula pilula--${t.side}`, t.side === "compra" ? "Compra" : "Venda"));
-    tr.append(lado);
-    tr.append(el("td", "num", num(t.quantity)));
-    tr.append(el("td", "num", brl.format(t.price)));
-    tr.append(el("td", "num", brl.format(t.fees)));
-
-    const acao = el("td", "num");
-    const apagar = el("button", "icone-lixeira", "✕");
-    apagar.title = "Remover operação";
-    apagar.addEventListener("click", async () => {
-      if (!confirm(`Remover a ${t.side} de ${num(t.quantity)} ${t.ticker}?`)) return;
-      try {
-        await api(comCarteira(`/transactions/${t.id}`), { method: "DELETE" });
-        invalidar();
-        await carregarTransacoes();
-      } catch (e) {
-        alert(e.message);
-      }
-    });
-    acao.append(apagar);
-    tr.append(acao);
-    corpo.append(tr);
+    // Se outra aba lancou uma operacao entre um clique e outro, tudo anda uma
+    // casa e a pagina seguinte repete a ultima linha desta. Pular pelo id e
+    // mais barato do que explicar a linha duplicada.
+    if (extrato.ids.has(t.id)) continue;
+    extrato.ids.add(t.id);
+    corpo.append(linhaDeOperacao(t));
   }
+
+  atualizarRodapeDoExtrato(pagina.tem_proxima);
+}
+
+function linhaDeOperacao(t) {
+  const tr = el("tr");
+  tr.append(el("td", null, dataBR(t.traded_at)));
+  tr.append(el("td", null, t.ticker));
+  const lado = el("td");
+  lado.append(el("span", `pilula pilula--${t.side}`, t.side === "compra" ? "Compra" : "Venda"));
+  tr.append(lado);
+  tr.append(el("td", "num", num(t.quantity)));
+  tr.append(el("td", "num", brl.format(t.price)));
+  tr.append(el("td", "num", brl.format(t.fees)));
+
+  const acao = el("td", "num");
+  const apagar = el("button", "icone-lixeira", "✕");
+  apagar.title = "Remover operação";
+  apagar.addEventListener("click", async () => {
+    if (!confirm(`Remover a ${t.side} de ${num(t.quantity)} ${t.ticker}?`)) return;
+    try {
+      await api(comCarteira(`/transactions/${t.id}`), { method: "DELETE" });
+      invalidar();
+      await carregarTransacoes();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  acao.append(apagar);
+  tr.append(acao);
+  return tr;
+}
+
+function atualizarRodapeDoExtrato(temProxima) {
+  const mostradas = extrato.ids.size;
+  const palavra = extrato.total === 1 ? "operação" : "operações";
+  $("#op-contagem").textContent =
+    `Mostrando ${mostradas.toLocaleString("pt-BR")} de ${extrato.total.toLocaleString("pt-BR")} ${palavra}`;
+  // `tem_proxima`, e nao `mostradas < total`: quem sabe se ha mais e o
+  // servidor. A conta local erraria justamente quando a deduplicacao pulou
+  // uma linha -- e o botao ficaria na tela para sempre, sem nada a carregar.
+  $("#op-carregar-mais").hidden = !temProxima;
+  $("#op-rodape").hidden = false;
 }
 
 function invalidar() {
   carregado.posicoes = carregado.fronteira = carregado.transacoes = false;
   carregarVisao().catch(() => {});
 }
+
+// "Carregar mais": travado enquanto busca. Dois cliques rapidos pediriam o
+// MESMO offset duas vezes -- a deduplicacao seguraria as linhas repetidas, mas
+// e melhor nao pedir.
+$("#op-carregar-mais").addEventListener("click", async () => {
+  const botao = $("#op-carregar-mais");
+  botao.disabled = true;
+  botao.textContent = "Carregando…";
+  try {
+    await carregarPaginaDeTransacoes();
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Carregar mais";
+  }
+});
 
 $("#btn-nova").addEventListener("click", () => {
   const form = $("#form-op");

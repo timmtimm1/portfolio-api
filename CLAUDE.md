@@ -42,6 +42,19 @@ fronteira explícita, nunca no meio da conta.
 
 **`lazy="raise"`** nos relationships: N+1 falha alto, não em silêncio.
 
+**Argon2 nunca no event loop.** Hash e verificação de senha custam ~80 ms de
+CPU e 64 MiB cada; chamados direto em `async def`, congelam o servidor inteiro
+(8 logins simultâneos pararam tudo por 1,1 s; no pool, 22 ms). Código async usa só
+`hash_password_async`, `verify_password_async` e `verify_password_dummy_async`,
+que rodam num pool dedicado com metade dos núcleos — o pool também é o teto de
+memória. `tests/test_login_async.py` varre `app/` por AST e reprova chamada
+síncrona.
+
+**Paginação por offset exige ordem TOTAL.** Todo `ORDER BY` de rota paginada
+termina na chave primária. `created_at` vem de `now()`, o início da transação:
+tudo gravado no mesmo commit empata, e com empate o Postgres devolve os
+empatados em ordem diferente entre páginas — linha repetida e linha sumida.
+
 ## Frontend (`app/static/`)
 
 - **Nunca `innerHTML`** com dado da API — monte nós de DOM. Há teste que barra.

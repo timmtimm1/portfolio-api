@@ -39,7 +39,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password
+from app.core.security import hash_password_async
 from app.models.asset import Asset
 from app.models.portfolio import Portfolio, TipoCarteira
 from app.models.transaction import Transaction, TransactionSide
@@ -90,7 +90,7 @@ async def criar(db: AsyncSession, *, validade_horas: int) -> User:
     """
     usuario = User(
         email=_email_descartavel(),
-        hashed_password=hash_password(secrets.token_urlsafe(32)),
+        hashed_password=await hash_password_async(secrets.token_urlsafe(32)),
         is_demo=True,
         expires_at=datetime.now(UTC) + timedelta(hours=validade_horas),
     )
