@@ -27,6 +27,10 @@ let ultimaOtimizacao = null;
 // Percentual por padrao: em reais, uma carteira que cresceu esmaga a escala e
 // o CDI vira uma linha reta, sem informacao nenhuma.
 let escala = "pct";
+// Esconde a linha "Carteira" (ou "Valor de mercado"/"Custo") e deixa só o
+// indexador -- pra quem quer ver como o Ibovespa sozinho se comportou, sem a
+// carteira dominando a escala do grafico.
+let soIndexador = false;
 // Carteira ativa. Vai como `portfolio_id` em toda chamada de carteira --
 // omitir usaria a real, e o usuario veria dados de outra carteira sem entender.
 let carteiraAtiva = null;
@@ -1140,17 +1144,47 @@ function desenharEvolucao(evolucao) {
   graficos.evolucao?.destroy();
 
   const pontos = evolucao.pontos;
-  if (!pontos.length) {
+  const btnIsolar = $("#btn-so-indexador");
+
+  // Precisa de pelo menos DOIS pontos pra desenhar uma linha -- o mesmo
+  // limiar que o backend usa pra decidir se compara com o indexador (ver
+  // `motivo` logo abaixo). Sem isto, uma carteira nova ficava com o quadro em
+  // branco e nenhuma pista do motivo: parecia defeito, não "ainda sem dado".
+  if (pontos.length < 2) {
     selo.hidden = true;
-    $("#evolucao-aviso").hidden = true;
+    btnIsolar.hidden = true;
+    limpar($("#legenda-evolucao"));
+    mostrarSe(
+      $("#evolucao-aviso"),
+      evolucao.motivo ??
+        (pontos.length === 0
+          ? "Ainda não há histórico registrado para esta carteira."
+          : "Só há um dia de histórico até agora -- o gráfico aparece a partir do segundo.")
+    );
     return;
   }
 
   const emPct = escala === "pct";
   const nomeBench = evolucao.benchmark?.nome;
-  $("#sub-evolucao").textContent = emPct
-    ? `Rentabilidade acumulada${nomeBench ? ` × ${nomeBench}` : ""}`
-    : `Valor de mercado × custo${nomeBench ? ` × ${nomeBench}` : ""}`;
+
+  // "Só o índice" só faz sentido havendo um índice: some quando "sem
+  // comparação" está selecionado. `soIndexador` continua em memória mesmo
+  // com o botão escondido, então voltar pra "vs Ibovespa" reaparece no estado
+  // em que a pessoa deixou, sem precisar marcar de novo.
+  const isolar = soIndexador && !!nomeBench;
+  btnIsolar.hidden = !nomeBench;
+  if (nomeBench) {
+    btnIsolar.textContent = `Só ${artigoDefinido(nomeBench)} ${nomeBench}`;
+    btnIsolar.setAttribute("aria-pressed", String(isolar));
+  }
+
+  $("#sub-evolucao").textContent = isolar
+    ? emPct
+      ? `Rentabilidade acumulada ${artigo(nomeBench)} ${nomeBench}`
+      : `Quanto o mesmo dinheiro valeria aplicado ${artigoEm(nomeBench)} ${nomeBench}`
+    : emPct
+      ? `Rentabilidade acumulada${nomeBench ? ` × ${nomeBench}` : ""}`
+      : `Valor de mercado × custo${nomeBench ? ` × ${nomeBench}` : ""}`;
 
   // `motivo` só vem preenchido quando um indexador FOI pedido e a comparação
   // falhou (BCB fora do ar, ou -- caso comum do IPCA -- o mês ainda não foi
@@ -1165,13 +1199,15 @@ function desenharEvolucao(evolucao) {
     // Retorno ponderado pelo tempo: isola o efeito do mercado dos aportes.
     // O percentual ingênuo (valor/custo − 1) despencaria a cada aporte, sem o
     // mercado ter mexido.
-    conjuntos.push({
-      label: "Carteira",
-      data: evolucao.rentabilidade.map((p) => Number(p.carteira) * 100),
-      borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
-      borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
-    });
-    rotulos.push(["#ff4fa3", "Carteira"]);
+    if (!isolar) {
+      conjuntos.push({
+        label: "Carteira",
+        data: evolucao.rentabilidade.map((p) => Number(p.carteira) * 100),
+        borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+        borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+      });
+      rotulos.push(["#ff4fa3", "Carteira"]);
+    }
 
     if (nomeBench) {
       conjuntos.push({
@@ -1179,25 +1215,30 @@ function desenharEvolucao(evolucao) {
         data: evolucao.rentabilidade.map((p) =>
           p.benchmark === null ? null : Number(p.benchmark) * 100
         ),
-        borderColor: "#f5b54a", borderWidth: 2, fill: false, tension: .35,
+        // Isolada, a linha do indexador ganha o preenchimento que "Carteira"
+        // teria -- sozinha, uma linha fina sem nada embaixo parece inacabada.
+        borderColor: "#f5b54a", backgroundColor: isolar ? gradiente(ctx, "#f5b54a") : undefined,
+        borderWidth: 2, fill: isolar, tension: .35,
         pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
       });
       rotulos.push(["#f5b54a", nomeBench]);
     }
   } else {
-    conjuntos.push(
-      {
-        label: "Valor de mercado", data: pontos.map((p) => Number(p.valor_mercado)),
-        borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
-        borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
-      },
-      {
-        label: "Custo", data: pontos.map((p) => Number(p.custo_total)),
-        borderColor: "#35d6e8", borderWidth: 1.8, borderDash: [5, 5],
-        fill: false, tension: .35, pointRadius: 0, pointHoverRadius: 5,
-      },
-    );
-    rotulos.push(["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]);
+    if (!isolar) {
+      conjuntos.push(
+        {
+          label: "Valor de mercado", data: pontos.map((p) => Number(p.valor_mercado)),
+          borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+          borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+        },
+        {
+          label: "Custo", data: pontos.map((p) => Number(p.custo_total)),
+          borderColor: "#35d6e8", borderWidth: 1.8, borderDash: [5, 5],
+          fill: false, tension: .35, pointRadius: 0, pointHoverRadius: 5,
+        },
+      );
+      rotulos.push(["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]);
+    }
 
     if (evolucao.benchmark) {
       // Alinhamos por DATA, não por posição: o indexador não rende em feriado,
@@ -1207,7 +1248,8 @@ function desenharEvolucao(evolucao) {
       conjuntos.push({
         label: nomeBench,
         data: pontos.map((p) => porData.get(p.date) ?? null),
-        borderColor: "#f5b54a", borderWidth: 2, fill: false, tension: .35,
+        borderColor: "#f5b54a", backgroundColor: isolar ? gradiente(ctx, "#f5b54a") : undefined,
+        borderWidth: 2, fill: isolar, tension: .35,
         pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
       });
       rotulos.push(["#f5b54a", nomeBench]);
@@ -1250,7 +1292,9 @@ function desenharEvolucao(evolucao) {
   }
 
   const c = evolucao.comparacao;
-  if (c && c.excesso_pontos_percentuais !== null) {
+  // Isolado, o selo "X% acima do Ibovespa" perde o sentido: não sobrou uma
+  // segunda linha na tela pra comparar.
+  if (!isolar && c && c.excesso_pontos_percentuais !== null) {
     const excesso = Number(c.excesso_pontos_percentuais);
     // Uma palavra muda entre os dois casos, não a frase inteira. Duplicar o
     // texto convidava as duas versões a divergirem na próxima edição.
@@ -1275,7 +1319,17 @@ document.querySelectorAll("[data-escala]").forEach((botao) => {
   });
 });
 
+$("#btn-so-indexador").addEventListener("click", () => {
+  soIndexador = !soIndexador;
+  // Mesma ideia do alternador %/R$: o dado já está em memória, então isolar a
+  // linha é redesenho, não requisição nova.
+  if (ultimaEvolucao) desenharEvolucao(ultimaEvolucao);
+});
+
 $("#indexador").addEventListener("change", () => {
+  // "sem comparação" não tem o que isolar -- volta ao estado normal em vez de
+  // guardar um "só o índice" que a próxima resposta não teria como cumprir.
+  if (!$("#indexador").value) soIndexador = false;
   carregarVisao().catch(() => {});
 });
 $("#periodo").addEventListener("change", () => {
@@ -1292,6 +1346,16 @@ $("#periodo").addEventListener("change", () => {
    que é o caso comum. */
 const ARTIGO_DO_INDEXADOR = { Selic: "da" };
 const artigo = (nome) => ARTIGO_DO_INDEXADOR[nome] ?? "do";
+
+// Mesma tabela, na forma que não contrai com "de": "Só o Ibovespa", não
+// "Só do Ibovespa".
+const ARTIGO_DEFINIDO_DO_INDEXADOR = { Selic: "a" };
+const artigoDefinido = (nome) => ARTIGO_DEFINIDO_DO_INDEXADOR[nome] ?? "o";
+
+// E na forma que contrai com "em": "aplicado NA Selic", não "aplicado DA
+// Selic" -- regência diferente de "acima DA Selic" (que é com "de").
+const ARTIGO_EM_DO_INDEXADOR = { Selic: "na" };
+const artigoEm = (nome) => ARTIGO_EM_DO_INDEXADOR[nome] ?? "no";
 
 const ROTULO_TIPO = {
   dividendo: "Dividendo",

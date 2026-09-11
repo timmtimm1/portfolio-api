@@ -421,6 +421,12 @@ h1, h2, h3, p { margin: 0; }
   border-radius: 999px; padding: 6px 12px; font-size: 12px; outline: none;
   color: var(--txt-2);
 }
+/* Estado ligado do "Só o índice" -- a mesma cor do alternador %/R$ ativo, pelo
+   atributo `aria-pressed` em vez de uma classe: um só lugar decide se o botão
+   está aceso, e é o mesmo que a leitora de tela usa. */
+.btn-so-indexador[aria-pressed="true"] {
+  background: rgba(123, 92, 255, .22); color: var(--txt); border-color: rgba(123, 92, 255, .3);
+}
 /* Verde quando bateu o indexador, vermelho quando ficou atrás. A cor carrega a
    resposta antes de a pessoa ler o número. */
 .selo-comparacao {

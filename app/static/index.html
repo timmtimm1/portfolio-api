@@ -205,6 +205,15 @@
               <option value="ibov">vs Ibovespa</option>
               <option value="">sem comparação</option>
             </select>
+            <!-- Nasce escondido: só faz sentido com um indexador escolhido, e
+                 desenharEvolucao() decide isso a cada resposta -- não o HTML. -->
+            <button
+              type="button"
+              class="seletor-mini btn-so-indexador"
+              id="btn-so-indexador"
+              aria-pressed="false"
+              hidden
+            >Só o índice</button>
             <select id="periodo" class="seletor-mini" aria-label="Período do gráfico">
               <option value="30">30 dias</option>
               <option value="90">90 dias</option>
