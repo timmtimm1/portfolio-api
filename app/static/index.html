@@ -559,6 +559,13 @@
             <tbody></tbody>
           </table>
         </div>
+        <!-- Rodape do extrato: quantas operacoes estao na tela e a proxima pagina.
+             Nasce escondido: antes da primeira resposta nao ha o que contar, e
+             "Mostrando 0 de 0" piscaria na tela. -->
+        <div class="tabela-rodape" id="op-rodape" hidden>
+          <span class="tabela-contagem" id="op-contagem"></span>
+          <button type="button" class="btn btn--fantasma btn--pequeno" id="op-carregar-mais" hidden>Carregar mais</button>
+        </div>
       </article>
     </section>
   </main>
