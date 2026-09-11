@@ -151,7 +151,18 @@ async def listar(
     itens = (
         (
             await db.execute(
-                stmt.order_by(Transaction.traded_at.desc(), Transaction.created_at.desc())
+                stmt.order_by(
+                    Transaction.traded_at.desc(),
+                    Transaction.created_at.desc(),
+                    # Desempate pela chave primaria: sem ele a ordem e parcial.
+                    # `created_at` vem de now(), o INICIO da transacao, entao
+                    # todo lancamento do mesmo commit empata -- e o demo grava
+                    # PETR4, VALE3 e TAEE11 no mesmo dia e no mesmo commit. Com
+                    # empate o Postgres pode devolver os empatados em ordem
+                    # diferente entre OFFSET 0 e OFFSET 7, e a paginacao repete
+                    # linha numa pagina e some com outra.
+                    Transaction.id.desc(),
+                )
                 .limit(limit)
                 .offset(offset)
             )

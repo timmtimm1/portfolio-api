@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # Teto rigido. O cliente pode pedir menos, nunca mais.
 #
@@ -29,6 +29,12 @@ class Page[T](BaseModel):
     limit: int
     offset: int
 
+    # `computed_field` e nao so `@property`: o Pydantic nao serializa property.
+    # A versao anterior calculava certo em Python e nunca chegou ao JSON nem ao
+    # OpenAPI -- um recurso morto com cara de vivo para quem lia o codigo.
+    # O `type: ignore` e o que o proprio Pydantic recomenda: o mypy nao aceita
+    # decorador em cima de property, mas o Pydantic depende exatamente disso.
+    @computed_field(description="Se existe pagina depois desta")  # type: ignore[prop-decorator]
     @property
     def tem_proxima(self) -> bool:
         return self.offset + len(self.items) < self.total
