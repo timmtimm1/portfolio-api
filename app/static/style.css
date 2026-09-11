@@ -979,7 +979,7 @@ h1, h2, h3, p { margin: 0; }
 .faixa-alvos .btn { margin-left: auto; }
 
 
-/* ══ Card explicativo (mesmo papel do card do Markowitz) ══ */
+/* ══ Card explicativo (mesmo papel do card da fronteira, na lateral) ══ */
 .cartao--explica { display: flex; gap: 14px; align-items: flex-start; }
 .explica-ic {
   flex: none; width: 34px; height: 34px; border-radius: 10px;
