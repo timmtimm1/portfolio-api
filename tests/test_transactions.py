@@ -62,6 +62,22 @@ class TestIsolamentoEntreUsuarios:
         # E o livro do dono continua intacto.
         assert (await client.get("/transactions", headers=dono)).json()["total"] == 1
 
+    async def test_nao_edita_transacao_alheia(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, dono = await usuario_logado(client)
+        outro = await segunda_conta(client)
+
+        criada = (await client.post("/transactions", json=op(), headers=dono)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"price": "999.00"}, headers=outro
+        )
+        assert resposta.status_code == 404
+        # E o preco do dono continua o que era -- o 404 nao pode ser so na
+        # resposta, com a escrita acontecendo do mesmo jeito.
+        do_dono = (await client.get(f"/transactions/{criada['id']}", headers=dono)).json()
+        assert do_dono["price"] == "20"
+
     async def test_posicoes_nao_misturam_carteiras(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
@@ -102,6 +118,9 @@ class TestIsolamentoEntreUsuarios:
         assert (await client.get("/transactions")).status_code == 401
         assert (await client.get(f"/transactions/{fake}")).status_code == 401
         assert (await client.delete(f"/transactions/{fake}")).status_code == 401
+        assert (
+            await client.patch(f"/transactions/{fake}", json={"price": "1.00"})
+        ).status_code == 401
         assert (await client.get("/portfolio/positions")).status_code == 401
 
 
@@ -459,3 +478,334 @@ class TestZerarTudo:
 
     async def test_todas_as_rotas_exigem_autenticacao(self, client: AsyncClient) -> None:
         assert (await client.delete("/transactions")).status_code == 401
+
+
+class TestEdicao:
+    """Correcao de uma operacao ja lancada (`PATCH /transactions/{id}`).
+
+    O que torna a edicao mais perigosa que a criacao: ela mexe no PASSADO. Uma
+    compra de 2024 corrigida pode derrubar uma venda de 2025 que dependia dela,
+    e o estrago so apareceria na proxima consulta de posicao -- longe do clique
+    que o causou. Por isso quase todo teste daqui confere tambem o que NAO
+    mudou.
+    """
+
+    async def test_corrige_o_preco_e_a_posicao_acompanha(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Ledger-as-truth na pratica: nao existe saldo para atualizar junto.
+
+        Corrigido o livro, o preco medio sai recalculado na consulta seguinte.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(price="20.00"), headers=h)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"price": "25.00"}, headers=h
+        )
+
+        assert resposta.status_code == 200
+        assert resposta.json()["price"] == "25"
+        p = (await client.get("/portfolio/positions", headers=h)).json()[0]
+        # "25" e nao "25.00": `preco_medio` sai pelo `_enxuto`, que corta zeros a
+        # direita. So `custo_total` e `resultado_realizado` passam pelo
+        # `_dinheiro` e ganham os centavos.
+        assert p["preco_medio"] == "25"
+        assert p["custo_total"] == "2500.00"
+
+    async def test_campo_ausente_nao_e_apagado(self, client: AsyncClient, db: AsyncSession) -> None:
+        """O motivo de ser PATCH e nao PUT.
+
+        Trocar o preco nao pode zerar a corretagem nem sumir com a observacao --
+        que e exatamente o que um PUT com corpo incompleto faria, preenchendo os
+        campos ausentes com o padrao do schema.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        corpo = op(price="20.00", fees="10.00") | {"note": "compra inicial"}
+        criada = (await client.post("/transactions", json=corpo, headers=h)).json()
+
+        editada = (
+            await client.patch(f"/transactions/{criada['id']}", json={"price": "25.00"}, headers=h)
+        ).json()
+
+        assert editada["price"] == "25"
+        assert editada["fees"] == "10"
+        assert editada["quantity"] == "100"
+        assert editada["traded_at"] == "2026-01-05"
+        assert editada["note"] == "compra inicial"
+        assert editada["side"] == "compra"
+
+    async def test_zerar_a_corretagem_funciona(self, client: AsyncClient, db: AsyncSession) -> None:
+        """0 e falso em Python, e essa e a armadilha.
+
+        Se o servico escolhesse o valor com `campos.get("fees") or atual`, esta
+        correcao seria silenciosamente ignorada e o usuario veria a taxa antiga
+        voltar sozinha. O custo total e quem denuncia.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (
+            await client.post("/transactions", json=op(price="20.00", fees="10.00"), headers=h)
+        ).json()
+
+        editada = (
+            await client.patch(f"/transactions/{criada['id']}", json={"fees": "0"}, headers=h)
+        ).json()
+
+        assert editada["fees"] == "0"
+        p = (await client.get("/portfolio/positions", headers=h)).json()[0]
+        assert p["custo_total"] == "2000.00"  # 2010,00 antes da correcao
+
+    async def test_note_nula_enviada_limpa_a_observacao(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """`null` enviado apaga; campo ausente preserva.
+
+        Os dois casos no mesmo teste de proposito: e a diferenca entre eles que
+        precisa valer, e um teste que olhasse so um dos dois passaria com o
+        servico tratando ambos igual.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        corpo = op() | {"note": "errei o preco"}
+        criada = (await client.post("/transactions", json=corpo, headers=h)).json()
+
+        preservou = (
+            await client.patch(f"/transactions/{criada['id']}", json={"price": "21.00"}, headers=h)
+        ).json()
+        assert preservou["note"] == "errei o preco"
+
+        limpou = (
+            await client.patch(f"/transactions/{criada['id']}", json={"note": None}, headers=h)
+        ).json()
+        assert limpou["note"] is None
+
+    async def test_muda_o_ticker_e_a_operacao_troca_de_livro(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """Lancou em PETR4 o que era VALE3.
+
+        A posicao antiga tem que DESAPARECER, nao so a nova aparecer -- um
+        servico que validasse apenas o ativo de destino deixaria a operacao
+        contando nos dois livros.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        await criar_ativo(db, ticker="VALE3")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(ticker="PETR4"), headers=h)).json()
+
+        editada = (
+            await client.patch(f"/transactions/{criada['id']}", json={"ticker": "VALE3"}, headers=h)
+        ).json()
+
+        assert editada["ticker"] == "VALE3"
+        posicoes = (await client.get("/portfolio/positions", headers=h)).json()
+        assert [p["ticker"] for p in posicoes] == ["VALE3"]
+        assert posicoes[0]["quantidade"] == "100"
+
+    async def test_recusa_tirar_do_livro_uma_compra_que_a_venda_usa(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """A correcao e valida no DESTINO e mesmo assim tem que ser recusada.
+
+        Mover a compra de PETR4 para VALE3 monta um livro impecavel em VALE3 --
+        uma compra sozinha. O estrago fica na ORIGEM: PETR4 passa a ter uma
+        venda de 100 sem nenhuma compra antes.
+
+        Este teste existe porque a mutacao "validar so o ativo de destino"
+        sobreviveu aos outros 16. O caminho feliz da troca de ticker nao prova
+        nada sobre a origem: nele o livro antigo fica vazio, e livro vazio
+        fecha.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        await criar_ativo(db, ticker="VALE3")
+        _, h = await usuario_logado(client)
+        compra = (await client.post("/transactions", json=op(ticker="PETR4"), headers=h)).json()
+        await client.post(
+            "/transactions",
+            json=op(ticker="PETR4", side="venda", price="30.00", traded_at="2026-02-10"),
+            headers=h,
+        )
+
+        resposta = await client.patch(
+            f"/transactions/{compra['id']}", json={"ticker": "VALE3"}, headers=h
+        )
+
+        assert resposta.status_code == 409
+        # E nada se moveu: a compra continua em PETR4.
+        intacta = (await client.get(f"/transactions/{compra['id']}", headers=h)).json()
+        assert intacta["ticker"] == "PETR4"
+
+    async def test_ticker_minusculo_e_normalizado(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="VALE3")
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(ticker="PETR4"), headers=h)).json()
+
+        editada = await client.patch(
+            f"/transactions/{criada['id']}", json={"ticker": "vale3"}, headers=h
+        )
+
+        assert editada.status_code == 200
+        assert editada.json()["ticker"] == "VALE3"
+
+    async def test_recusa_correcao_que_deixaria_venda_a_descoberto(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """409, e o livro fica INTACTO.
+
+        Reduzir a compra para 50 deixaria a venda de 100 sem lastro. Recusar na
+        resposta mas gravar assim mesmo seria pior que nao ter a rota.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        compra = (await client.post("/transactions", json=op(quantity="100"), headers=h)).json()
+        await client.post(
+            "/transactions",
+            json=op(side="venda", quantity="100", price="30.00", traded_at="2026-02-10"),
+            headers=h,
+        )
+
+        resposta = await client.patch(
+            f"/transactions/{compra['id']}", json={"quantity": "50"}, headers=h
+        )
+
+        assert resposta.status_code == 409
+        intacta = (await client.get(f"/transactions/{compra['id']}", headers=h)).json()
+        assert intacta["quantity"] == "100"
+
+    async def test_recusa_venda_movida_para_antes_da_compra(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """A validacao e cronologica, nao um conferir de saldo atual.
+
+        Somando tudo, comprou 100 e vendeu 100 -- fecha. So que com a venda em
+        janeiro e a compra em fevereiro, ela acontece sobre posicao zero. Um
+        servico que olhasse so o total final aceitaria isso.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(traded_at="2026-02-10"), headers=h)
+        venda = (
+            await client.post(
+                "/transactions",
+                json=op(side="venda", price="30.00", traded_at="2026-03-15"),
+                headers=h,
+            )
+        ).json()
+
+        resposta = await client.patch(
+            f"/transactions/{venda['id']}", json={"traded_at": "2026-01-05"}, headers=h
+        )
+
+        assert resposta.status_code == 409
+
+    async def test_recusa_ticker_fora_do_catalogo(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(), headers=h)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"ticker": "ZZZZ9"}, headers=h
+        )
+
+        assert resposta.status_code == 422
+
+    async def test_recusa_data_no_futuro(self, client: AsyncClient, db: AsyncSession) -> None:
+        """Mesma recusa da criacao.
+
+        A regra mora numa funcao de modulo justamente para nao existir so no
+        schema de criacao -- a edicao e o caminho mais provavel de alguem
+        digitar 2027 sem querer.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(), headers=h)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"traded_at": "2099-01-01"}, headers=h
+        )
+
+        assert resposta.status_code == 422
+
+    async def test_recusa_campo_desconhecido(self, client: AsyncClient, db: AsyncSession) -> None:
+        """`extra="forbid"` ganha o teste dele.
+
+        Sem isso, mandar `preco` em vez de `price` devolveria 200 sem ter
+        corrigido nada -- o pior desfecho possivel, porque parece sucesso.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(price="20.00"), headers=h)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"preco": "25.00"}, headers=h
+        )
+
+        assert resposta.status_code == 422
+        inalterada = (await client.get(f"/transactions/{criada['id']}", headers=h)).json()
+        assert inalterada["price"] == "20"
+
+    async def test_recusa_quantidade_zero(self, client: AsyncClient, db: AsyncSession) -> None:
+        """Os tetos e pisos do schema de criacao valem na edicao tambem."""
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(), headers=h)).json()
+
+        resposta = await client.patch(
+            f"/transactions/{criada['id']}", json={"quantity": "0"}, headers=h
+        )
+
+        assert resposta.status_code == 422
+
+    async def test_corpo_vazio_nao_altera_nada(self, client: AsyncClient, db: AsyncSession) -> None:
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        criada = (await client.post("/transactions", json=op(), headers=h)).json()
+
+        resposta = await client.patch(f"/transactions/{criada['id']}", json={}, headers=h)
+
+        assert resposta.status_code == 200
+        assert resposta.json()["price"] == criada["price"]
+        assert resposta.json()["quantity"] == criada["quantity"]
+
+    async def test_id_inexistente_devolve_404(self, client: AsyncClient) -> None:
+        import uuid
+
+        _, h = await usuario_logado(client)
+
+        resposta = await client.patch(
+            f"/transactions/{uuid.uuid4()}", json={"price": "25.00"}, headers=h
+        )
+
+        assert resposta.status_code == 404
+
+    async def test_troca_compra_por_venda(self, client: AsyncClient, db: AsyncSession) -> None:
+        """Marcou compra onde era venda -- o erro de clique mais comum.
+
+        Precisa de posicao anterior para a venda ter lastro, senao a correcao
+        cairia (corretamente) em 409.
+        """
+        await criar_ativo(db, ticker="PETR4")
+        _, h = await usuario_logado(client)
+        await client.post("/transactions", json=op(quantity="300"), headers=h)
+        errada = (
+            await client.post(
+                "/transactions", json=op(quantity="100", traded_at="2026-02-10"), headers=h
+            )
+        ).json()
+
+        editada = await client.patch(
+            f"/transactions/{errada['id']}", json={"side": "venda"}, headers=h
+        )
+
+        assert editada.status_code == 200
+        assert editada.json()["side"] == "venda"
+        p = (await client.get("/portfolio/positions", headers=h)).json()[0]
+        assert p["quantidade"] == "200"

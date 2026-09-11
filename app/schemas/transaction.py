@@ -17,16 +17,34 @@ from app.models.transaction import TransactionSide
 Quantidade = Annotated[Decimal, Field(gt=0, le=Decimal("1e9"), decimal_places=8)]
 Preco = Annotated[Decimal, Field(gt=0, le=Decimal("1e9"), decimal_places=6)]
 Taxas = Annotated[Decimal, Field(ge=0, le=Decimal("1e7"), decimal_places=6)]
+Ticker = Annotated[str, Field(min_length=4, max_length=12, pattern=r"^[A-Za-z0-9]{4,6}$")]
+Nota = Annotated[str | None, Field(max_length=200)]
+
+
+def _recusa_data_futura(v: date_type) -> date_type:
+    """Data futura nao e erro de digitacao inofensivo: ela entraria no fim do
+    livro e distorceria o preco medio de tudo que viesse depois.
+
+    Funcao de modulo, nao metodo: corrigir uma operacao precisa da mesma recusa
+    que lanca-la. Com a regra escrita duas vezes, um dia so uma das duas seria
+    corrigida -- e a brecha estaria justamente na edicao, que e o caminho por
+    onde se conserta erro de digitacao.
+    """
+    from datetime import UTC, datetime
+
+    if v > datetime.now(UTC).date():
+        raise ValueError("a data da operacao nao pode estar no futuro")
+    return v
 
 
 class TransactionCreate(BaseModel):
-    ticker: Annotated[str, Field(min_length=4, max_length=12, pattern=r"^[A-Za-z0-9]{4,6}$")]
+    ticker: Ticker
     side: TransactionSide
     quantity: Quantidade
     price: Preco
     fees: Taxas = Decimal(0)
     traded_at: date_type
-    note: Annotated[str | None, Field(max_length=200)] = None
+    note: Nota = None
 
     @field_validator("ticker")
     @classmethod
@@ -36,13 +54,46 @@ class TransactionCreate(BaseModel):
     @field_validator("traded_at")
     @classmethod
     def _nao_pode_ser_no_futuro(cls, v: date_type) -> date_type:
-        """Data futura nao e erro de digitacao inofensivo: ela entraria no fim do
-        livro e distorceria o preco medio de tudo que viesse depois."""
-        from datetime import UTC, datetime
+        return _recusa_data_futura(v)
 
-        if v > datetime.now(UTC).date():
-            raise ValueError("a data da operacao nao pode estar no futuro")
-        return v
+
+class TransactionUpdate(BaseModel):
+    """Correcao de uma operacao ja lancada. Campo ausente nao muda nada.
+
+    Parcial de proposito. Corrigir o preco de uma compra nao deveria obrigar o
+    cliente a reenviar quantidade, data e taxas -- e um reenvio ao qual faltasse
+    um campo sobrescreveria dado bom com o padrao do schema (`fees` viraria 0,
+    `note` viraria nulo). Num livro contabil isso e corrupcao silenciosa.
+
+    `note` e o campo que exige cuidado: `null` ENVIADO limpa a observacao,
+    ausente a preserva. Quem separa os dois casos e `model_fields_set` (via
+    `exclude_unset`), nunca uma comparacao com None -- com ela, apagar uma nota
+    seria impossivel.
+
+    `extra="forbid"` porque num PATCH um nome de campo errado e indistinguivel
+    de "nao quis mudar": o cliente manda `preco` em vez de `price`, recebe 200 e
+    a correcao simplesmente nao aconteceu. Melhor recusar na borda.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticker: Ticker | None = None
+    side: TransactionSide | None = None
+    quantity: Quantidade | None = None
+    price: Preco | None = None
+    fees: Taxas | None = None
+    traded_at: date_type | None = None
+    note: Nota = None
+
+    @field_validator("ticker")
+    @classmethod
+    def _normaliza(cls, v: str | None) -> str | None:
+        return v.strip().upper() if v is not None else None
+
+    @field_validator("traded_at")
+    @classmethod
+    def _nao_pode_ser_no_futuro(cls, v: date_type | None) -> date_type | None:
+        return _recusa_data_futura(v) if v is not None else None
 
 
 class TransactionRead(BaseModel):

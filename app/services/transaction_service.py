@@ -8,6 +8,8 @@ acontece uma vez, em `get_carteira` -- o unico caminho pelo qual um
 from __future__ import annotations
 
 import uuid
+from datetime import date as date_type
+from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, Select, delete, func, select
@@ -18,10 +20,10 @@ from app.models.asset import Asset
 from app.models.portfolio import Portfolio, TipoCarteira
 from app.models.snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction, TransactionSide
-from app.schemas.transaction import TransactionCreate
+from app.schemas.transaction import TransactionCreate, TransactionUpdate
 from app.services import split, split_service
 from app.services.exceptions import DomainError
-from app.services.position import Posicao, calcular_posicoes
+from app.services.position import Posicao, TransacaoLike, calcular_posicoes
 
 
 class AtivoNaoEncontradoError(DomainError):
@@ -98,7 +100,14 @@ async def criar(db: AsyncSession, carteira: Portfolio, dados: TransactionCreate)
     existentes = await _carregar_do_ativo(db, carteira.id, ativo.id)
     # Objeto leve so para a validacao: nao adicionamos a transacao a sessao antes
     # de ter certeza, para nao depender de rollback para desfazer.
-    novo = _Candidata(ativo.ticker, dados)
+    novo = _Candidata(
+        ativo.ticker,
+        side=dados.side,
+        quantity=dados.quantity,
+        price=dados.price,
+        fees=dados.fees,
+        traded_at=dados.traded_at,
+    )
     # O livro precisa estar AJUSTADO aqui, nao so na leitura. Quem comprou 100
     # acoes antes de um desdobramento 2:1 tem 200 hoje e pode vender 150 -- com
     # o livro cru, essa venda legitima seria recusada como venda a descoberto.
@@ -113,15 +122,43 @@ async def criar(db: AsyncSession, carteira: Portfolio, dados: TransactionCreate)
 
 
 class _Candidata:
-    """Adaptador da transacao ainda nao gravada para o Protocol do calculo."""
+    """Adaptador de uma transacao ainda nao gravada para o Protocol do calculo.
 
-    def __init__(self, ticker: str, dados: TransactionCreate) -> None:
+    Serve a criacao e a edicao: nos dois casos o livro precisa ser conferido COM
+    o valor novo antes de ele existir no banco. Na edicao ela e indispensavel
+    por um motivo a mais -- a transacao editada ja esta na sessao, e mexer nos
+    atributos dela antes de validar mudaria junto a lista de "como esta hoje"
+    que serve de base de comparacao.
+    """
+
+    def __init__(
+        self,
+        ticker: str,
+        *,
+        side: TransactionSide,
+        quantity: Decimal,
+        price: Decimal,
+        fees: Decimal,
+        traded_at: date_type,
+    ) -> None:
         self.ticker = ticker
-        self.side: TransactionSide = dados.side
-        self.quantity = dados.quantity
-        self.price = dados.price
-        self.fees = dados.fees
-        self.traded_at = dados.traded_at
+        self.side = side
+        self.quantity = quantity
+        self.price = price
+        self.fees = fees
+        self.traded_at = traded_at
+
+
+def _valor(campos: dict[str, Any], nome: str, atual: Any) -> Any:
+    """Campo enviado vence; ausente (ou nulo) mantem o que ja estava.
+
+    Existe para o codigo nao usar `or`: `fees` pode ser 0, que e falso em
+    Python -- com `campos.get("fees") or atual`, zerar a corretagem de uma
+    operacao seria silenciosamente ignorado e o usuario veria o valor antigo
+    voltar sozinho.
+    """
+    novo = campos.get(nome)
+    return atual if novo is None else novo
 
 
 async def listar(
@@ -188,6 +225,104 @@ async def obter(
         .options(selectinload(Transaction.asset))
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def atualizar(
+    db: AsyncSession,
+    portfolio_id: uuid.UUID,
+    transacao_id: uuid.UUID,
+    dados: TransactionUpdate,
+) -> Transaction | None:
+    """Corrige uma operacao ja lancada e revalida os livros que ela toca.
+
+    Devolve None quando a transacao nao existe nesta carteira -- mesmo contrato
+    de `obter()`, para que a rota nao precise separar "nao existe" de "nao e
+    seu". As duas respondem 404, de proposito.
+
+    ## Dois livros, nao um
+
+    Trocar o ticker de uma operacao mexe em DOIS ativos: o antigo perde uma
+    linha, o novo ganha uma. Validar so o destino deixaria passar o caso em que
+    quem quebra e a SAIDA -- tirar de PETR4 uma compra de 2024 pode deixar a
+    descoberto uma venda de 2025 que dependia dela. Os dois precisam fechar,
+    senao a edicao produz um livro que o proprio sistema recusaria criar e o
+    calculo de posicao passa a levantar excecao em toda consulta seguinte.
+
+    ## A validacao vem antes de mexer no objeto
+
+    A transacao editada veio da mesma sessao que `_carregar_do_ativo` consulta,
+    entao e o MESMO objeto Python -- a identity map do SQLAlchemy nao devolve
+    duas copias. Atribuir os campos novos antes de validar faria a lista de
+    "como esta hoje" ja conter a mudanca, e a comparacao perderia o sentido.
+    Por isso o valor novo entra como `_Candidata` e a linha antiga sai da lista
+    por id.
+    """
+    transacao = await obter(db, portfolio_id, transacao_id)
+    if transacao is None:
+        return None
+
+    # `model_fields_set`, nao `model_dump()`: e ele que separa "mandou null" de
+    # "nao mandou o campo". Ver o docstring de TransactionUpdate.
+    campos: dict[str, Any] = {nome: getattr(dados, nome) for nome in dados.model_fields_set}
+    if not campos:
+        # PATCH vazio nao e erro, so nao tem o que fazer. Sair aqui evita
+        # revalidar livro e refazer snapshot a toa.
+        return transacao
+
+    ativo_antigo = transacao.asset
+    ticker_novo: str = _valor(campos, "ticker", ativo_antigo.ticker)
+    if ticker_novo == ativo_antigo.ticker:
+        ativo_novo = ativo_antigo
+    else:
+        encontrado = (
+            await db.execute(select(Asset).where(Asset.ticker == ticker_novo))
+        ).scalar_one_or_none()
+        if encontrado is None:
+            raise AtivoNaoEncontradoError(ticker_novo)
+        ativo_novo = encontrado
+
+    candidata = _Candidata(
+        ativo_novo.ticker,
+        side=_valor(campos, "side", transacao.side),
+        quantity=_valor(campos, "quantity", transacao.quantity),
+        price=_valor(campos, "price", transacao.price),
+        fees=_valor(campos, "fees", transacao.fees),
+        traded_at=_valor(campos, "traded_at", transacao.traded_at),
+    )
+
+    afetados = {ativo_antigo.id, ativo_novo.id}
+    eventos = await split_service.dos_ativos(db, afetados)
+    for asset_id in afetados:
+        # O livro tem que estar AJUSTADO por desdobramento aqui pelo mesmo
+        # motivo de `criar()`: quem comprou 100 acoes antes de um 2:1 tem 200
+        # hoje, e sem o ajuste uma venda legitima de 150 seria recusada.
+        livro: list[TransacaoLike] = [
+            linha
+            for linha in await _carregar_do_ativo(db, portfolio_id, asset_id)
+            if linha.id != transacao_id
+        ]
+        if asset_id == ativo_novo.id:
+            livro.append(candidata)
+        calcular_posicoes(split.ajustar(livro, eventos))
+
+    transacao.asset_id = ativo_novo.id
+    transacao.side = candidata.side
+    transacao.quantity = candidata.quantity
+    transacao.price = candidata.price
+    transacao.fees = candidata.fees
+    transacao.traded_at = candidata.traded_at
+    # `note` fora do `_valor`: aqui null ENVIADO significa apagar a observacao,
+    # e nao "manter a que estava". A presenca da chave e que decide.
+    if "note" in campos:
+        transacao.note = campos["note"]
+
+    await db.commit()
+    await db.refresh(transacao, attribute_names=["updated_at"])
+    # Reatribuido a mao porque `lazy="raise"` faria o acesso a `.asset` depois
+    # do commit levantar excecao em vez de recarregar -- mesmo cuidado de
+    # `criar()`.
+    transacao.asset = ativo_novo
+    return transacao
 
 
 async def remover(db: AsyncSession, portfolio_id: uuid.UUID, transacao_id: uuid.UUID) -> bool:
