@@ -54,6 +54,22 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         coluna_enum(AssetType, length=20), default=AssetType.OUTRO, nullable=False
     )
 
+    # Valor de mercado, em reais. Entra por causa do Black-Litterman: o retorno
+    # de equilibrio nasce de uma otimizacao reversa sobre os pesos da CARTEIRA
+    # DE MERCADO, e o peso de mercado de um papel e o valor de mercado dele
+    # sobre o total. Sem esta coluna nao existe prior -- so a media historica,
+    # que e justamente o que o modelo veio substituir.
+    #
+    # Nulavel de proposito: o CSV de fundamentos nao cobre todo o catalogo (BDR,
+    # fundo pequeno, papel recem-listado). Ausencia e informacao aqui, e quem
+    # consome decide o que fazer -- ver `pesos_de_mercado` em
+    # `app/services/black_litterman.py`, que cai para peso igual e AVISA, em vez
+    # de inventar um numero.
+    #
+    # Numeric e nao float pela regra de sempre: e dinheiro. A escala comporta
+    # 10^18, e a maior empresa da B3 nao passa de 10^12.
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), default=None)
+
     def __repr__(self) -> str:
         return f"<Asset {self.ticker}>"
 

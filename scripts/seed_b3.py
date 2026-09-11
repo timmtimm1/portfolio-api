@@ -74,6 +74,10 @@ async def importar_ativos(db: AsyncSession, origem: Path) -> int:
             "nome": (linha.get("nome") or "").strip()[:120] or None,
             "setor": setor,
             "tipo": classificar(ticker, setor),
+            # Vem como float em notacao decimal ("242710773760.0"). Nulo quando a
+            # pipeline nao apurou -- 2 dos 151 papeis hoje. Quem usa o dado
+            # (Black-Litterman) trata a ausencia; o seed nao inventa.
+            "market_cap": _decimal_ou_none((linha.get("market_cap") or "").strip()),
         }
 
     if not linhas:
@@ -85,7 +89,12 @@ async def importar_ativos(db: AsyncSession, origem: Path) -> int:
     stmt = insert(Asset).values(list(linhas.values()))
     stmt = stmt.on_conflict_do_update(
         index_elements=[Asset.ticker],
-        set_={"nome": stmt.excluded.nome, "setor": stmt.excluded.setor, "tipo": stmt.excluded.tipo},
+        set_={
+            "nome": stmt.excluded.nome,
+            "setor": stmt.excluded.setor,
+            "tipo": stmt.excluded.tipo,
+            "market_cap": stmt.excluded.market_cap,
+        },
     )
     await db.execute(stmt)
     await db.commit()

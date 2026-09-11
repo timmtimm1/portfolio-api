@@ -62,6 +62,7 @@ async def criar_ativo(
     nome: str | None = None,
     setor: str = "Energy",
     tipo: AssetType = AssetType.ACAO,
+    market_cap: Decimal | None = None,
 ) -> Asset:
     """O nome padrao deriva do ticker de proposito.
 
@@ -70,7 +71,16 @@ async def criar_ativo(
     nome e casava com a busca por "PETR". Valor padrao compartilhado entre
     objetos distintos e uma armadilha classica de fabrica de teste.
     """
-    ativo = Asset(ticker=ticker, nome=nome or f"Empresa {ticker}", setor=setor, tipo=tipo)
+    # `market_cap` fica None por padrao de proposito: e o estado do catalogo
+    # antes de a pipeline rodar, e e nele que o Black-Litterman cai para peso
+    # igual. O teste que quiser o prior de mercado de verdade pede o valor.
+    ativo = Asset(
+        ticker=ticker,
+        nome=nome or f"Empresa {ticker}",
+        setor=setor,
+        tipo=tipo,
+        market_cap=market_cap,
+    )
     db.add(ativo)
     await db.commit()
     await db.refresh(ativo)
