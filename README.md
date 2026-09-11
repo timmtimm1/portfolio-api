@@ -4,7 +4,7 @@ Uma API que responde quatro perguntas sobre uma carteira da B3:
 
 1. **Quanto eu tenho?** — posição, preço médio, proventos, lucro e prejuízo
 2. **Fui bem?** — comparado à Selic, ao Ibovespa, ao CDI e à inflação
-3. **Poderia ser melhor?** — a fronteira eficiente de Markowitz, sobre os seus ativos
+3. **Poderia ser melhor?** — a fronteira eficiente sobre os seus ativos, com retorno esperado por Black-Litterman
 4. **E se eu continuar?** — projeção por Monte Carlo, com aportes mensais
 
 Você registra as compras e vendas. Todo o resto é calculado a partir disso — não existe
@@ -260,7 +260,8 @@ que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
 |---|---|
 | **`services/position.py`** | O preço médio brasileiro. Compra aumenta o custo; **venda não muda o preço médio** — mexe no resultado realizado. Taxa de compra entra no custo, taxa de venda sai do lucro. |
 | **`services/metrics.py`** | Volatilidade, correlação, covariância. 252 pregões por ano, desvio-padrão *amostral*, retorno *geométrico* (CAGR) e não média simples. |
-| **`services/optimizer.py`** | Markowitz. Recebe retornos esperados e covariância, devolve pesos. Resolve 50 problemas de otimização (SLSQP) para desenhar a fronteira. |
+| **`services/optimizer.py`** | Média-variância. Recebe retornos esperados e covariância, devolve pesos. Resolve 50 problemas de otimização (SLSQP) para desenhar a fronteira. |
+| **`services/black_litterman.py`** | De onde vem o retorno esperado. Parte do equilíbrio implícito nos pesos de mercado (π = δΣw) e combina com opiniões, cada uma pesando pela incerteza do próprio mercado. Sem opinião, a carteira ótima **é** a de mercado. |
 | **`services/dividend.py`** | Quanto você recebeu, dada a data-com. E o desconto de 15% quando é JCP. |
 | **`services/split.py`** | Reescreve o livro nos termos de hoje. 100 ações antes de um 2:1 viram 200 a metade do preço — **e o custo total não muda**. |
 | **`services/rebalance.py`** | Do peso ideal para a ordem concreta. Ninguém compra 40%; compra 12 ações. |
@@ -309,6 +310,10 @@ razão, que um dos dois está errado.
 A nuvem de carteiras possíveis, a curva na borda, e dois pontos marcados: a de menor
 risco e a de melhor relação risco-retorno. O ponto âmbar é a **sua** carteira hoje —
 normalmente fora da curva, que é o ponto do exercício.
+
+O retorno esperado de cada ativo não é a média do passado: vem do **Black-Litterman**,
+que parte do equilíbrio implícito nos preços de mercado. Por isso, sem nenhuma opinião
+informada, a carteira de melhor relação risco-retorno é a própria carteira de mercado.
 
 ![Fronteira eficiente](docs/img/fronteira.jpg)
 
@@ -368,18 +373,27 @@ no vertical. A **fronteira é a borda superior esquerda** dessa nuvem: se uma ca
 cai *dentro* da nuvem, existe outra que dá mais retorno com o mesmo risco. Ela é
 simplesmente pior.
 
+**De onde vem o retorno esperado** (`services/black_litterman.py`): não da média do
+passado. O otimizador amplifica erro no retorno esperado muito mais que na covariância,
+e a média histórica de um ativo é uma estimativa ruim — com ela, a carteira "ótima"
+concentrava no papel que por acaso mais subiu na janela. O Black-Litterman inverte a
+pergunta: que retorno o mercado precisa estar esperando para que os preços de hoje façam
+sentido? A resposta sai dos pesos de mercado e da covariância, sem média de ativo
+nenhum. Sobre esse equilíbrio entram as opiniões do investidor — por enquanto, só pela API.
+
 **Como o código calcula** (`services/optimizer.py`): escolhe um retorno-alvo, pergunta
 qual combinação o atinge com a menor volatilidade, e repete **50 vezes**. Sujeito a três
 regras: os pesos somam 100%, nenhum é negativo, e nenhum ativo passa de um teto.
 
-Esse teto não é matemática, é bom senso enfiado no modelo à força. Sem ele, o
-otimizador rotineiramente joga quase tudo no papel que mais subiu na amostra —
-matematicamente ótimo para o passado, e o oposto de diversificar.
+Esse teto não é matemática, é bom senso enfiado no modelo à força. Com retorno esperado
+por média histórica, o otimizador jogava quase tudo no papel que mais subiu na amostra —
+matematicamente ótimo para o passado, e o oposto de diversificar. O Black-Litterman
+atacou a causa; o teto continua como rede.
 
-> **A limitação que o código não esconde:** o modelo assume que o passado estima o
-> futuro. Ele não estima. Mude a janela de observação em alguns meses e a carteira ótima
-> muda completamente. O valor da fronteira é **mostrar o trade-off**, não entregar a
-> resposta certa.
+> **A limitação que o código não esconde:** a covariância e o prêmio de risco do mercado
+> ainda saem do histórico, e o passado não estima o futuro. O Black-Litterman deixa a
+> carteira ótima muito menos sensível à janela escolhida, mas não a torna certa. O valor
+> da fronteira é **mostrar o trade-off**, não entregar a resposta.
 
 O mesmo vale para a projeção: os cenários saem de uma distribuição normal, que **não
 tem cauda gorda**. Crises reais são mais frequentes e mais profundas do que o modelo

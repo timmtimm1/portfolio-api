@@ -31,7 +31,8 @@ reconstruível porque a cotação é sobrescrita.
 (`app/core/deps.py`). Nenhuma rota aceita `user_id`/`portfolio_id` do corpo.
 Recurso de outro usuário responde **404, nunca 403** (403 confirma existência).
 
-**Módulos puros.** `optimizer`, `position`, `rebalance`, `simulation`, `split`,
+**Módulos puros.** `optimizer`, `black_litterman`, `position`, `rebalance`,
+`simulation`, `split`,
 `dividend`, `target`, `trade` não tocam banco, ORM nem HTTP. Entram dados, saem
 dados — testáveis com calculadora. Serviços `*_service.py` são a camada que
 persiste.
@@ -62,6 +63,28 @@ empatados em ordem diferente entre páginas — linha repetida e linha sumida.
   aparece ao salvar. Há teste que barra.
 - `[hidden] { display: none !important }` no CSS é obrigatório: sem ele,
   qualquer `display` do autor anula o atributo `hidden`.
+
+## Fronteira eficiente
+
+O `mu` vem de **Black-Litterman**, não da média histórica. A troca aconteceu
+porque o otimizador amplifica erro no retorno esperado muito mais que na
+covariância, e média histórica por ativo tem erro-padrão enorme — a carteira
+"ótima" concentrava no papel que por acaso mais subiu na janela.
+
+- **`pi` e `mu` são retorno EXCEDENTE**; o resto do sistema usa retorno total.
+  `retorno_total()` e `para_excesso()` são a fronteira. Errar isso não estoura:
+  as contas fecham e o Sharpe sai negativo na carteira de máximo Sharpe.
+- **A frente usa a covariância POSTERIOR**, não a amostral. Ela depende das
+  opiniões, então opinar muda até a carteira de mínima variância.
+- **`delta` fora da faixa 0,5–10 cai para 2,5.** Numa janela de queda o delta
+  amostral fica negativo, `pi` inverte de sinal e o equilíbrio passa a dizer
+  que ativo arriscado rende menos.
+- **Sem `market_cap` no catálogo, o prior deixa de ser o mercado** e vira peso
+  igual — `equilibrio.usou_peso_igual` avisa. O `criar_ativo` dos testes nasce
+  sem valor de mercado de propósito.
+- Opinião que cita ativo fora do cálculo é **descartada com motivo**, nunca
+  aplicada pela metade: zerar o coeficiente ausente transforma "PETR4 supera
+  VALE3 em 3 pontos" em "PETR4 rende 3%".
 
 ## Migrations
 
@@ -96,7 +119,7 @@ Não digite senhas em formulários; peça para o Bernardo fazer esse passo.
 
 Feito: auth (JWT + refresh com detecção de reuso), carteiras real/simuladas,
 transações, cotações com cache, proventos, desdobramentos, snapshots,
-fronteira eficiente (Markowitz), rebalanceamento, Monte Carlo, observabilidade
+fronteira eficiente (Black-Litterman), rebalanceamento, Monte Carlo, observabilidade
 (JSON logs + Prometheus), conta demo de 2h, alvos (stop gain/loss + meta de
 acumulação), área de trade (trade ótimo).
 

@@ -87,7 +87,7 @@ async def metricas_de_ativos(
 @router.post(
     "/portfolio/optimize",
     response_model=OptimizationResponse,
-    summary="Fronteira eficiente de Markowitz",
+    summary="Fronteira eficiente, com retorno esperado por Black-Litterman",
 )
 async def otimizar_carteira(
     carteira: CarteiraAtual,
