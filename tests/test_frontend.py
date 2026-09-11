@@ -288,6 +288,121 @@ class TestAvisoDeComparacaoFalha:
         assert 'mostrarSe($("#evolucao-aviso"), evolucao.motivo)' in js
 
 
+class TestQuadroVazioDeEvolucao:
+    """Sem nenhum snapshot -- carteira recem-criada, ou o job diario de fotos
+    ainda nao rodou -- `pontos` chegava vazio, e a funcao saia sem desenhar
+    NEM avisar nada: o quadro ficava em branco, indistinguivel de defeito.
+    Aconteceu de verdade: uma carteira real, sem nenhum snapshot ainda,
+    mostrava o cartao de evolucao inteiramente mudo.
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text())
+
+    def test_o_limiar_e_dois_pontos_nao_zero(self) -> None:
+        """Um unico ponto tambem nao desenha nada -- a linha usa `pointRadius:
+        0`, entao um ponto sozinho fica invisivel mesmo sem estar `hidden`."""
+        assert "if (pontos.length < 2)" in self._js()
+
+    def test_o_aviso_tem_texto_proprio_mesmo_sem_motivo_da_api(self) -> None:
+        """`motivo` so vem preenchido quando um indexador foi pedido (ver
+        `evolucao_comparada` no backend); sem indexador, a tela precisa do
+        proprio texto pra nao ficar muda."""
+        js = self._js()
+        bloco = js[js.index("if (pontos.length < 2)") : js.index("const emPct")]
+        assert "evolucao.motivo ??" in bloco, (
+            "sem isto, uma carteira sem indexador escolhido volta a ficar muda"
+        )
+        assert "Ainda não há histórico" in bloco
+        assert "Só há um dia de histórico" in bloco
+
+    def test_a_legenda_antiga_nao_fica_pendurada(self) -> None:
+        """Trocar de uma carteira COM historico para uma SEM historico não
+        pode deixar a legenda (ou o grafico) da carteira anterior na tela."""
+        js = self._js()
+        bloco = js[js.index("if (pontos.length < 2)") : js.index("const emPct")]
+        assert 'limpar($("#legenda-evolucao"))' in bloco
+
+
+class TestIsolarLinhaDoIndexador:
+    """ "quero poder ver só a evolução do Ibovespa" -- a carteira sempre
+    aparecia junto da comparação, e nunca havia como isolar só a linha do
+    indexador, mesmo quando ela já estava calculada e pronta.
+    """
+
+    def _js(self) -> str:
+        return _sem_comentarios((ESTATICOS / "app.js").read_text())
+
+    def _corpo_desenhar_evolucao(self) -> str:
+        """So o corpo de `desenharEvolucao`, para `.index("} else {")` (comum
+        em qualquer arquivo deste tamanho) não pegar um `else` de outra
+        função inteiramente sem relação."""
+        js = self._js()
+        inicio = js.index("function desenharEvolucao")
+        fim = js.index('document.querySelectorAll("[data-escala]")')
+        assert inicio < fim
+        return js[inicio:fim]
+
+    def test_o_botao_existe_e_nasce_escondido(self) -> None:
+        """So faz sentido com um indexador escolhido -- comeca escondido, e
+        quem decide se aparece dali em diante e o proprio desenho."""
+        html = (ESTATICOS / "index.html").read_text()
+        assert 'id="btn-so-indexador"' in html
+        pos = html.index('id="btn-so-indexador"')
+        assert "hidden" in html[max(0, pos - 200) : pos + 150]
+
+    def test_o_clique_alterna_o_estado_e_redesenha_sem_pedir_nada_de_novo(self) -> None:
+        """Mesma ideia do alternador %/R$: a comparação já está calculada na
+        resposta guardada em `ultimaEvolucao`; isolar a linha é redesenho, não
+        uma requisição nova."""
+        js = self._js()
+        inicio = js.index('$("#btn-so-indexador").addEventListener')
+        handler = js[inicio : inicio + 350]
+        assert "soIndexador = !soIndexador" in handler
+        assert "desenharEvolucao(ultimaEvolucao)" in handler
+        assert "api(" not in handler
+        assert "fetch(" not in handler
+
+    def test_isolar_esconde_a_linha_da_carteira_em_percentual(self) -> None:
+        corpo = self._corpo_desenhar_evolucao()
+        bloco = corpo[corpo.index("if (emPct) {") : corpo.index("} else {")]
+        assert bloco.index("if (!isolar)") < bloco.index('label: "Carteira"'), (
+            "sem o `if (!isolar)` em volta, isolar so ACRESCENTARIA uma linha "
+            "em vez de tirar a da carteira"
+        )
+
+    def test_isolar_esconde_valor_de_mercado_e_custo_em_reais(self) -> None:
+        corpo = self._corpo_desenhar_evolucao()
+        pos_else = corpo.index("} else {")
+        bloco = corpo[pos_else : corpo.index("const formatarEixo", pos_else)]
+        assert bloco.index("if (!isolar)") < bloco.index('label: "Valor de mercado"')
+
+    def test_a_linha_do_indexador_aparece_isolado_ou_nao(self) -> None:
+        """O que muda com `isolar` e a carteira, nunca o indexador: ele
+        continua condicionado só a `nomeBench`/`evolucao.benchmark` existir."""
+        corpo = self._corpo_desenhar_evolucao()
+        bloco_pct = corpo[corpo.index("if (emPct) {") : corpo.index("} else {")]
+        assert "if (nomeBench) {" in bloco_pct
+        # A checagem do indexador não pode estar ANINHADA dentro do `if
+        # (!isolar)` da carteira -- senão isolar apagaria a própria linha que
+        # deveria sobrar sozinha.
+        pos_fecha_isolar = bloco_pct.index("if (!isolar)")
+        pos_bench = bloco_pct.index("if (nomeBench) {")
+        trecho_isolar = bloco_pct[pos_fecha_isolar:pos_bench]
+        assert trecho_isolar.count("{") == trecho_isolar.count("}"), (
+            "o bloco do `if (!isolar)` precisa estar fechado antes do `if (nomeBench)` do indexador"
+        )
+
+    def test_trocar_para_sem_comparacao_desarma_o_isolar(self) -> None:
+        """Sem indexador escolhido não ha o que isolar -- guardar um
+        `soIndexador` aceso que a proxima resposta nao teria como cumprir
+        deixaria o botao aceso e a carteira sumida, sem explicacao."""
+        js = self._js()
+        inicio = js.index('$("#indexador").addEventListener')
+        handler = js[inicio : inicio + 300]
+        assert "soIndexador = false" in handler
+
+
 class TestCartaoDeProventos:
     """O cálculo de proventos existia sem aparecer em lugar nenhum.
 
