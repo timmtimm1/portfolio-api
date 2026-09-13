@@ -1,0 +1,20 @@
+# So o necessario para a imagem de producao entra no contexto do build --
+# menos dado trafegando para o daemon, e nenhum segredo local vai junto por
+# engano (o .env, sobretudo).
+.git
+.venv
+.env
+.env.*
+!.env.example
+var/
+logs/
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+__pycache__/
+*.pyc
+tests/
+docs/img/
+*.md
