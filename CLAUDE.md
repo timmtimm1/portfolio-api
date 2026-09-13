@@ -86,23 +86,19 @@ covariância, e média histórica por ativo tem erro-padrão enorme — a cartei
   aplicada pela metade: zerar o coeficiente ausente transforma "PETR4 supera
   VALE3 em 3 pontos" em "PETR4 rende 3%".
 
-## Cadastro e e-mail
+## Cadastro
 
-- **Login exige e-mail confirmado.** O cadastro manda um link de uso único
-  (24 h). `autenticar` recusa com `EmailNaoConfirmadoError` (403) **depois** de
-  conferir a senha — antes disso, viraria oráculo de quem tem conta pendente.
-- **O token vai no fragmento** (`/painel/#confirmar=…`), nunca na query: o
-  fragmento não chega ao servidor nem aos logs. O JS tira o token da barra de
-  endereço antes de chamar a API.
-- **O e-mail sai por `BackgroundTasks`** — SMTP fora do ar não derruba o
-  cadastro —, e o reenvio responde sempre igual (202), exista a conta ou não.
-- **Sem `SMTP_HOST`, fora de produção o e-mail vira `.eml` em `var/emails`**, e o
-  link não vai para o log. Em produção a aplicação não sobe sem SMTP, com
-  `SMTP_TLS=nenhum` ou com `APP_URL` apontando para localhost.
-- Nos testes, `criar_usuario` confirma pelo **link real**, lido da
-  `CaixaDeEmailFake` do `conftest`; `confirmar=False` cria conta pendente.
-- Contas anteriores à coluna `email_confirmado_em` nasceram confirmadas na
-  migration `3621b2863c09`.
+- **A conta nasce utilizável.** O cadastro cria e o frontend entra em seguida com
+  as mesmas credenciais — não há etapa de confirmação.
+- **O projeto não manda e-mail.** A confirmação por link existiu (migrations
+  `3621b2863c09` e `0fe51817224f`) e saiu junto com o deploy: o plano Free do
+  Render bloqueia as portas SMTP 25, 465 e 587 desde 26/09/2025, então nenhum
+  e-mail sairia de lá — e a trava que exigia SMTP em produção impedia até a
+  aplicação de subir. Confirmar sem conseguir enviar tranca toda conta nova.
+- **Se o envio voltar** (instância paga, ou provedor transacional na porta 2525),
+  o historico está em `0fe51817224f`; nada do código atual depende disso.
+- A senha é pedida **duas vezes** no cadastro. Não é frescura: não existe
+  recuperar senha, então um erro de digitação cria conta que ninguém abre.
 
 ## Migrations
 
@@ -143,12 +139,13 @@ Não digite senhas em formulários; peça para o Bernardo fazer esse passo.
 Feito: auth (JWT + refresh com detecção de reuso), carteiras real/simuladas,
 transações (com edição via PATCH), cotações com cache, proventos, desdobramentos, snapshots,
 fronteira eficiente (Black-Litterman), rebalanceamento, Monte Carlo, observabilidade
-(JSON logs + Prometheus), conta demo de 2h, confirmação de e-mail no cadastro, carteira simulada na lateral, alvos (stop gain/loss + meta de
+(JSON logs + Prometheus), conta demo de 2h, carteira simulada na lateral, alvos (stop gain/loss + meta de
 acumulação), área de trade (trade ótimo).
 
-Pendente: **deploy** (adiado de propósito — agora também depende de SMTP e de
-um `APP_URL` público, por causa da confirmação de e-mail), recuperar senha,
-PWA para celular (o botão "Sair" some em telas ≤860px, precisa de correção).
+Deploy no ar: Render (Free) + Postgres no Neon. O Free hiberna após 15 min sem
+tráfego e bloqueia portas SMTP — foi o que derrubou a confirmação de e-mail.
+
+Pendente: recuperar senha, PWA para celular.
 Imposto de renda foi excluído deliberadamente — modelar IR exigiria somar
 vendas do mês, prejuízo acumulado e tipo de operação; número fiscal quase
 certo é pior que nenhum.

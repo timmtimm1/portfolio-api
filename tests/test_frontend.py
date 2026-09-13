@@ -846,13 +846,14 @@ class TestPaginacaoDoExtrato:
         assert "finally" in handler
 
 
-class TestCadastroComConfirmacao:
-    """O cadastro cadastrava com a senha digitada UMA vez, e ja entrava.
+class TestCadastroPedeASenhaDuasVezes:
+    """O cadastro cadastrava com a senha digitada UMA vez, e um erro de digitacao
+    criava uma conta que ninguem consegue abrir -- nao existe recuperar senha.
+    A senha e repetida e conferida ANTES de chamar a API.
 
-    Um erro de digitacao criava uma conta que ninguem consegue abrir -- e ainda
-    nao existe recuperar senha. Agora a senha e repetida e conferida antes da
-    API, a conta so entra depois do e-mail confirmado, e o link de confirmacao e
-    tratado como a credencial que e.
+    A confirmacao por e-mail que existia aqui saiu do projeto: o plano Free do
+    Render bloqueia as portas SMTP, entao nenhum e-mail sairia, e uma conta que
+    so entra depois de um link que nunca chega e uma conta trancada.
     """
 
     def _js(self) -> str:
@@ -881,36 +882,22 @@ class TestCadastroComConfirmacao:
         corpo = js[js.index("async function criarConta()") :][:1500]
         assert corpo.index('$("#senha-confirmacao").value') < corpo.index("/auth/register")
 
-    def test_nao_entra_sozinho_depois_de_criar(self) -> None:
-        """Entrar logo apos o cadastro pularia a confirmacao de e-mail inteira."""
+    def test_entra_com_as_mesmas_credenciais_depois_de_criar(self) -> None:
+        """A conta ja nasce utilizavel. Mandar a pessoa digitar de novo o que
+        acabou de digitar seria pedir duas vezes a mesma coisa pelo mesmo
+        resultado."""
         js = self._js()
         corpo = js[js.index("async function criarConta()") :][:1500]
-        assert "entrarNoApp" not in corpo
-        assert "requestSubmit" not in js
+        assert corpo.index("/auth/register") < corpo.index("entrarComSenha()")
 
-    def test_login_com_email_nao_confirmado_oferece_reenvio(self) -> None:
+    def test_nao_sobrou_fluxo_de_confirmacao(self) -> None:
+        """Recurso removido: nenhuma chamada, botao ou link pode ter ficado para
+        tras chamando rota que o backend nao serve mais."""
         js = self._js()
-        corpo = js[js.index("async function entrarComSenha()") :][:900]
-        assert "r.status === 403" in corpo
-        assert '$("#btn-reenviar").hidden = false' in corpo
-
-    def test_o_link_usa_fragmento_e_nao_query(self) -> None:
-        js = self._js()
-        corpo = js[js.index("async function tratarLinkDeConfirmacao()") :][:1500]
-        assert "location.hash" in corpo
-        assert 'searchParams.get("confirmar")' not in js
-
-    def test_o_token_sai_da_barra_antes_da_chamada(self) -> None:
-        """Se a rede falhar no meio, o token nao pode ficar no historico."""
-        js = self._js()
-        corpo = js[js.index("async function tratarLinkDeConfirmacao()") :][:1500]
-        assert corpo.index("history.replaceState") < corpo.index("/auth/confirmar")
-
-    def test_o_reenvio_nao_revela_se_a_conta_existe(self) -> None:
-        js = self._js()
-        trecho = js[js.index('$("#btn-reenviar").addEventListener') :][:1600]
-        assert "Se houver uma conta" in trecho
-        assert "não tem cadastro" not in trecho
+        html = self._html()
+        for morto in ("/auth/confirmar", "/auth/confirmacao/reenviar", "btn-reenviar"):
+            assert morto not in js, morto
+            assert morto not in html, morto
 
 
 class TestCarteiraSimuladaVisivel:

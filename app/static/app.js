@@ -387,18 +387,11 @@ function definirModo(modo) {
   $("#btn-criar").textContent = criando ? "Entrar" : "Criar agora";
   $("#login-erro").hidden = true;
   $("#login-aviso").hidden = true;
-  $("#btn-reenviar").hidden = true;
 }
 
 async function entrarComSenha() {
   const corpo = new URLSearchParams({ username: $("#email").value, password: $("#senha").value });
   const r = await fetch(`${API}/auth/login`, { method: "POST", body: corpo });
-  if (r.status === 403) {
-    // Senha certa, e-mail ainda nao confirmado. So o dono chega aqui.
-    mostrarErroLogin("Confirme seu e-mail antes de entrar. Não achou o link? Peça outro abaixo.");
-    $("#btn-reenviar").hidden = false;
-    return;
-  }
   if (!r.ok) throw new Error(await mensagemDeFalha(r));
   token = (await r.json()).access_token;
   await entrarNoApp();
@@ -421,14 +414,12 @@ async function criarConta() {
   if (r.status === 409) throw new Error("Este e-mail já tem conta. Use “Entrar”.");
   if (!r.ok) throw new Error(await mensagemDeFalha(r));
 
-  definirModo("entrar");
+  // A conta ja nasce utilizavel, entao entramos com as MESMAS credenciais que a
+  // pessoa acabou de digitar. Mandar redigitar seria pedir duas vezes a mesma
+  // coisa pelo mesmo resultado.
+  await entrarComSenha();
   $("#senha").value = "";
   $("#senha-confirmacao").value = "";
-  mostrarAvisoLogin(
-    `Conta criada. Enviamos um link de confirmação para ${email}. ` +
-    "Abra o e-mail (confira também o spam) e depois entre aqui.",
-  );
-  $("#btn-reenviar").hidden = false;
 }
 
 $("#form-login").addEventListener("submit", async (ev) => {
@@ -463,39 +454,6 @@ $("#btn-ver-senha").addEventListener("click", () => {
 $("#btn-criar").addEventListener("click", () => {
   definirModo(modoLogin === "entrar" ? "criar" : "entrar");
   $(modoLogin === "criar" && $("#email").value ? "#senha" : "#email").focus();
-});
-
-$("#btn-reenviar").addEventListener("click", async () => {
-  const email = $("#email").value.trim();
-  if (!email) {
-    mostrarErroLogin("Digite o e-mail da conta para receber um link novo.");
-    $("#email").focus();
-    return;
-  }
-  const botao = $("#btn-reenviar");
-  botao.disabled = true;
-  try {
-    const r = await fetch(`${API}/auth/confirmacao/reenviar`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (r.status === 429) {
-      mostrarErroLogin("Muitos pedidos de reenvio. Tente de novo mais tarde.");
-      return;
-    }
-    if (!r.ok) throw new Error(await mensagemDeFalha(r));
-    // Mesma frase exista a conta ou nao: dizer "este e-mail nao tem cadastro"
-    // transformaria o botao num jeito de descobrir quem usa o app.
-    mostrarAvisoLogin(
-      "Se houver uma conta aguardando confirmação para este e-mail, enviamos um link novo. " +
-      "Confira também o spam.",
-    );
-  } catch (e) {
-    mostrarErroLogin(e.message);
-  } finally {
-    botao.disabled = false;
-  }
 });
 
 async function sair() {
@@ -2821,45 +2779,8 @@ document.addEventListener("click", (ev) => {
 
 // Retoma a sessão pelo cookie httpOnly: se ele existir e for válido, o usuário
 // entra direto. É o que torna possível não guardar nada em localStorage.
-// Link de confirmacao: `#confirmar=<token>`. Fragmento, e nao query, porque o
-// navegador nunca manda o fragmento ao servidor -- o token nao cai em log de
-// acesso nenhum. Devolve true quando havia um link para tratar.
-async function tratarLinkDeConfirmacao() {
-  const achado = location.hash.match(/^#confirmar=([A-Za-z0-9_-]+)$/);
-  if (!achado) return false;
-
-  // Sai da barra de endereco ANTES da chamada. Se a rede falhar no meio, o token
-  // nao fica exposto no historico, num favorito ou num print da tela.
-  history.replaceState(null, "", location.pathname + location.search);
-  mostrarLogin();
-  definirModo("entrar");
-  try {
-    const r = await fetch(`${API}/auth/confirmar`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: achado[1] }),
-    });
-    if (r.ok) {
-      $("#email").value = (await r.json()).email;
-      mostrarAvisoLogin("E-mail confirmado. Agora é só entrar com a sua senha.");
-      $("#senha").focus();
-    } else if (r.status === 429) {
-      mostrarErroLogin("Muitas tentativas agora há pouco. Aguarde um minuto e abra o link de novo.");
-    } else {
-      mostrarErroLogin("Este link de confirmação é inválido ou expirou. Digite seu e-mail e peça um novo.");
-      $("#btn-reenviar").hidden = false;
-    }
-  } catch {
-    mostrarErroLogin("Não foi possível confirmar agora. Tente abrir o link de novo.");
-  }
-  return true;
-}
-
-tratarLinkDeConfirmacao()
-  .then((tratou) => {
-    if (tratou) return;
-    return renovar().then((ok) => (ok ? entrarNoApp() : mostrarLogin()));
-  })
+renovar()
+  .then((ok) => (ok ? entrarNoApp() : mostrarLogin()))
   .catch(mostrarLogin);
 
 
