@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "portfolio"
     POSTGRES_USER: str = "portfolio"
     POSTGRES_PASSWORD: SecretStr  # sem default: obrigatorio
+    # Postgres gerenciado (Neon, Supabase, RDS) recusa conexao sem TLS. O
+    # compose local nao tem TLS nenhum, e o Postgres efemero da suite tambem
+    # nao -- por isso o padrao e `false`, e quem sobe num host gerenciado liga
+    # explicitamente. Ligar por padrao quebraria `make testes` de imediato.
+    #
+    # Os dois drivers nomeiam a opcao de formas DIFERENTES: asyncpg le `ssl`,
+    # psycopg le `sslmode`. Passar `sslmode` para o asyncpg nao e ignorado --
+    # o SQLAlchemy repassa o parametro desconhecido para `asyncpg.connect()`,
+    # que levanta TypeError. Por isso cada URL abaixo recebe a sua.
+    POSTGRES_SSL: bool = False
 
     # --- Seguranca ------------------------------------------------------------
     # Sem default. Gere com: python -c "import secrets; print(secrets.token_urlsafe(64))"
@@ -232,7 +242,7 @@ class Settings(BaseSettings):
         conexao, num traceback do Sentry nem no `echo=True` do engine. Uma string
         crua vazaria em todos esses lugares.
         """
-        return URL.create(
+        url = URL.create(
             drivername="postgresql+asyncpg",
             username=self.POSTGRES_USER,
             password=self.POSTGRES_PASSWORD.get_secret_value(),
@@ -240,13 +250,20 @@ class Settings(BaseSettings):
             port=self.POSTGRES_PORT,
             database=self.POSTGRES_DB,
         )
+        return url.update_query_dict({"ssl": "require"}) if self.POSTGRES_SSL else url
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> URL:
         """Mesma URL, driver sincrono (psycopg). O Alembic roda migrations fora do
         event loop, entao ele usa esta -- nao a async."""
-        return self.database_url.set(drivername="postgresql+psycopg")
+        url = self.database_url.set(drivername="postgresql+psycopg")
+        if not self.POSTGRES_SSL:
+            return url
+        # Troca `ssl` (nome do asyncpg, herdado da URL async) por `sslmode`
+        # (nome do psycopg). Deixar os dois faria o psycopg reclamar de
+        # parametro desconhecido.
+        return url.difference_update_query(["ssl"]).update_query_dict({"sslmode": "require"})
 
 
 @lru_cache

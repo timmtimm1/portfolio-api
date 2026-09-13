@@ -12,6 +12,7 @@ from datetime import timedelta
 import jwt
 import pytest
 
+from app.core.config import Settings
 from app.core.security import (
     create_token,
     decode_token,
@@ -115,3 +116,33 @@ class TestJWT:
         )
         with pytest.raises(jwt.MissingRequiredClaimError):
             decode_token(incompleto, "access")
+
+
+class TestSslNoBancoGerenciado:
+    """Neon, Supabase e RDS recusam conexao sem TLS -- e cada driver nomeia a
+    opcao de um jeito.
+
+    O `asyncpg` le `ssl`; o `psycopg`, que o Alembic usa, le `sslmode`. O
+    SQLAlchemy repassa parametro desconhecido direto para o driver, entao
+    mandar `sslmode` para o asyncpg nao e ignorado silenciosamente: levanta
+    TypeError na hora de conectar. Um deploy quebrado por uma letra.
+    """
+
+    def test_desligado_por_padrao(self) -> None:
+        """O compose local e o Postgres da suite nao tem TLS. Ligar por padrao
+        quebraria `make testes` e `make api` de imediato."""
+        cfg = Settings(POSTGRES_PASSWORD="p")
+        assert cfg.POSTGRES_SSL is False
+        assert "ssl" not in cfg.database_url.query
+        assert "sslmode" not in cfg.database_url_sync.query
+
+    def test_asyncpg_recebe_ssl(self) -> None:
+        cfg = Settings(POSTGRES_PASSWORD="p", POSTGRES_SSL=True)
+        assert cfg.database_url.query["ssl"] == "require"
+
+    def test_psycopg_recebe_sslmode_e_nao_ssl(self) -> None:
+        """O `ssl` da URL async nao pode sobrar na sync: o psycopg recusa
+        parametro que nao conhece."""
+        cfg = Settings(POSTGRES_PASSWORD="p", POSTGRES_SSL=True)
+        assert cfg.database_url_sync.query["sslmode"] == "require"
+        assert "ssl" not in cfg.database_url_sync.query
