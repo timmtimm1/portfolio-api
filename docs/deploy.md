@@ -46,20 +46,20 @@ outro produto.
 
 ---
 
-## 2. Preparar o e-mail: senha de app do Gmail
+## 2. E-mail: não há
 
-Em produção a aplicação **se recusa a subir sem SMTP configurado** — é uma
-trava proposital em `app/core/config.py` (`_email_em_producao`), porque sem
-isso o cadastro pareceria funcionar mas ninguém receberia o link de confirmação.
+O projeto não envia e-mail, e isso é consequência direta deste deploy: **o plano
+Free do Render bloqueia as portas SMTP 25, 465 e 587** desde 26/09/2025. A
+confirmação de cadastro por link existia, dependia de SMTP, e foi removida
+quando ficou claro que nenhum e-mail sairia dali — uma conta que só entra depois
+de um link que nunca chega é uma conta trancada.
 
-1. Ative a verificação em duas etapas na sua conta Google, se ainda não tiver.
-2. Acesse <https://myaccount.google.com/apppasswords> e gere uma senha de app
-   (nome sugerido: "Portfolio Tracker").
-3. Guarde a senha de 16 caracteres — entra como `SMTP_PASSWORD` no passo 3.
-   **Não é a senha da sua conta Google.**
+Nada a configurar aqui. A conta criada no painel já entra na mesma ação.
 
-Se preferir outro provedor (Zoho, Outlook, um transacional como Resend), a
-única mudança é `SMTP_HOST`/`SMTP_PORT`/`SMTP_TLS` — o restante do fluxo é igual.
+**Se um dia quiser e-mail de volta**, são dois caminhos: uma instância paga do
+Render (libera 587/465), ou um provedor transacional na **porta 2525**, que o
+Render não bloqueia — Brevo, SendGrid e Mailgun oferecem. O código do envio foi
+removido; o histórico está na migration `0fe51817224f`.
 
 ---
 
@@ -94,13 +94,6 @@ Se preferir outro provedor (Zoho, Outlook, um transacional como Resend), a
    | `POSTGRES_SSL` | `true` — o Neon recusa conexão sem TLS |
    | `SECRET_KEY` | ❓ gere com `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` |
    | `SERVICE_API_KEY` | ❓ gere com `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` — chave do cron de snapshots |
-   | `APP_URL` | a URL que o Render atribuir ao serviço, ex. `https://portfolio-api-xxxx.onrender.com` (dá para conferir/copiar depois do primeiro deploy e atualizar aqui) |
-   | `SMTP_HOST` | `smtp.gmail.com` |
-   | `SMTP_PORT` | `587` |
-   | `SMTP_USER` | seu e-mail do Gmail |
-   | `SMTP_PASSWORD` | a senha de app do passo 2 |
-   | `SMTP_TLS` | `starttls` |
-   | `SMTP_REMETENTE` | `Portfolio Tracker <seu-email@gmail.com>` |
    | `LOG_JSON` | `true` |
    | `RISK_FREE_RATE` | `0.10` (ou a Selic/CDI atual) |
    | `BRAPI_TOKEN` | opcional — deixe em branco ou pegue o seu em brapi.dev |
@@ -111,9 +104,14 @@ Se preferir outro provedor (Zoho, Outlook, um transacional como Resend), a
 
 5. **Create Web Service**. O primeiro build demora (baixa a imagem base,
    instala as dependências); os próximos reaproveitam cache.
-6. Quando o deploy terminar, copie a URL pública e cole de volta em `APP_URL`
-   nas variáveis de ambiente (ela só existe depois do primeiro deploy) —
-   depois disso o Render redeploya sozinho.
+6. Quando o deploy terminar, copie a URL pública — ela entra nos secrets do
+   GitHub, no passo 4. Não há variável de ambiente que precise dela.
+
+> **Atualizando um serviço que já existe:** a configuração rejeita variável
+> desconhecida (`extra="forbid"`, para um typo virar erro de boot em vez de
+> segredo ignorado). Se o serviço foi criado quando o e-mail existia, **apague**
+> `APP_URL` e todas as `SMTP_*` antes do próximo deploy — senão a aplicação não
+> sobe.
 
 **Free tier hiberna após 15 min sem tráfego.** A primeira requisição depois de
 um tempo parado demora ~1 min para acordar — normal, não é erro.
@@ -145,9 +143,9 @@ curl https://SUA-URL.onrender.com/api/v1/health
 # {"status":"ok","environment":"production","version":"0.1.0"}
 ```
 
-Abra `https://SUA-URL.onrender.com/painel/`, cadastre-se com o e-mail
-principal, confira que o e-mail de confirmação chegou de verdade (não mais
-`var/emails/*.eml` — isso só existe fora de produção) e entre.
+Abra `https://SUA-URL.onrender.com/painel/` e cadastre-se: você entra na mesma
+ação, sem confirmar nada. A senha é pedida duas vezes de propósito — não existe
+recuperar senha, e um erro de digitação criaria uma conta que ninguém abre.
 
 A partir daqui, os dois PCs (e o celular) usam essa mesma URL. O
 `docker compose` local continua de pé para quando você for mexer no código —

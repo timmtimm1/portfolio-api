@@ -17,7 +17,6 @@ from app.services.exceptions import (
     ContaInativaError,
     CredenciaisInvalidasError,
     EmailJaCadastradoError,
-    EmailNaoConfirmadoError,
 )
 
 
@@ -72,11 +71,6 @@ async def autenticar(db: AsyncSession, email: str, senha: str) -> User:
     # atacante descobriria contas desativadas sem saber a senha delas.
     if not usuario.is_active:
         raise ContaInativaError
-
-    # Depois da inativa, e nao antes: conta desativada E nao confirmada responde
-    # como desativada (o 401 generico), sem revelar nada a mais.
-    if not usuario.email_confirmado:
-        raise EmailNaoConfirmadoError
 
     if novo_hash is not None:
         usuario.hashed_password = novo_hash
