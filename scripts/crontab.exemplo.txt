@@ -1,4 +1,7 @@
-# Fecha a cadeia de atualizacao do historico de precos.
+# Fecha a cadeia de atualizacao do historico de precos NO BANCO LOCAL.
+#
+# Opcional: so vale a pena se voce desenvolve com dados recentes na maquina.
+# Producao e carregada pelo `.github/workflows/dados.yml`, sem cron nenhum.
 #
 # 19h10, seg a sex -- 10 minutos depois do cron do `mercado_financeiro`
 # (19h00), que por sua vez roda ~45 min depois do GitHub Actions (18h15).

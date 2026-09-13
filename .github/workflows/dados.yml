@@ -1,0 +1,106 @@
+name: Carga do catalogo e do historico no banco
+
+# Fecha o ultimo elo que ainda dependia de uma maquina ligada.
+#
+# O catalogo da B3 e o historico de fechamentos nao vem de API em tempo de
+# requisicao: sao carregados no banco por `scripts/seed_b3.py`, a partir dos CSVs
+# que a pipeline do `mercado_financeiro` commita naquele repositorio. Ate aqui,
+# quem fazia essa carga era um cron LOCAL (`scripts/atualizar_historico.sh`), que
+# escrevia no Postgres da propria maquina.
+#
+# Com o deploy, isso virou um problema de verdade: o banco de producao (Neon) nao
+# era alcancado por cron nenhum, entao subiu com o schema e zero linhas -- e a
+# busca de ativos no painel nao devolvia nada, porque nao havia o que devolver.
+# Um cron local apontado para o Neon resolveria, mas amarraria os dados de
+# producao a um notebook especifico estar ligado as 19h.
+#
+# Aqui nao depende de ninguem.
+
+on:
+  schedule:
+    # 22:10 UTC = 19:10 em Brasilia, seg a sex. Quase uma hora depois do
+    # pipeline do `mercado_financeiro` (21:15 UTC), que e quem produz os CSVs.
+    # A margem e conforto, nao requisito: o seed e idempotente, entao rodar
+    # antes do CSV novo apenas regrava o que ja estava la.
+    - cron: "10 22 * * 1-5"
+  # Dispara a carga INICIAL (um banco novo comeca vazio) e permite reprocessar
+  # um dia que falhou, sem esperar o proximo horario.
+  workflow_dispatch:
+  # Mesmo truque do snapshots.yml: um workflow cujos unicos gatilhos sao
+  # `schedule` e `workflow_dispatch` pode nunca ser indexado pelo GitHub -- e
+  # `workflow_dispatch` exige que ele ja esteja indexado, um catch-22.
+  push:
+    paths:
+      - .github/workflows/dados.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  # Duas execucoes ao mesmo tempo nao corromperiam nada (a escrita e um upsert
+  # idempotente), mas escreveriam as mesmas 37 mil linhas em duplicidade de
+  # esforco, e uma delas esbarraria no limite de conexoes do plano free.
+  group: dados
+  cancel-in-progress: false
+
+jobs:
+  carga:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar se o banco esta configurado
+        id: check
+        env:
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          if [ -z "$POSTGRES_HOST" ] || [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "pronto=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::POSTGRES_HOST ou POSTGRES_PASSWORD nao configurados - pulando."
+          else
+            echo "pronto=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout do portfolio-api
+        if: steps.check.outputs.pronto == 'true'
+        uses: actions/checkout@v5
+
+      - name: Checkout dos dados (mercado_financeiro)
+        if: steps.check.outputs.pronto == 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: timmtimm1/mercado_financeiro
+          # Os CSVs somam ~3 MB e o que importa e o estado ATUAL deles; o
+          # historico de commits do outro repo nao serve para nada aqui.
+          fetch-depth: 1
+          path: dados
+
+      - name: Instalar uv
+        if: steps.check.outputs.pronto == 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        if: steps.check.outputs.pronto == 'true'
+        # Sem --all-groups: o seed nao roda teste nem checa tipo, entao pytest,
+        # mypy e testcontainers seriam minutos de instalacao para nada.
+        run: uv sync --locked
+
+      - name: Carregar catalogo e historico
+        if: steps.check.outputs.pronto == 'true'
+        env:
+          ENVIRONMENT: production
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          # Neon, como qualquer Postgres gerenciado, recusa conexao sem TLS.
+          POSTGRES_SSL: "true"
+          # A configuracao exige SECRET_KEY (>= 32 caracteres) para carregar, mas
+          # o seed nao emite nem verifica token nenhum -- so escreve no banco.
+          # Uma chave descartavel satisfaz a validacao sem espalhar a chave real
+          # de producao por um segundo lugar, que seria mais uma copia para
+          # rotacionar e mais uma para vazar.
+          SECRET_KEY: chave-descartavel-o-seed-nao-assina-token-nenhum-000000
+        run: uv run python -m scripts.seed_b3 --origem dados

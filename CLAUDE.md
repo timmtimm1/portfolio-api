@@ -150,5 +150,11 @@ Imposto de renda foi excluído deliberadamente — modelar IR exigiria somar
 vendas do mês, prejuízo acumulado e tipo de operação; número fiscal quase
 certo é pior que nenhum.
 
-Dados de mercado vêm do repo irmão `~/Projects/mercado_financeiro` via CSV,
-carregados por cron (ver `scripts/atualizar_historico.sh`).
+Dados de mercado (catálogo da B3 + histórico de fechamentos) vêm do repo irmão
+`timmtimm1/mercado_financeiro` via CSV e são carregados por `scripts/seed_b3.py`.
+Em **produção**, quem roda isso é o GitHub Actions (`.github/workflows/dados.yml`,
+19h10 BRT nos dias úteis) — sem depender de máquina ligada. O
+`scripts/atualizar_historico.sh` continua existindo, mas só para o banco **local**.
+
+Banco novo começa vazio: sem essa carga, a busca de ativos não devolve nada,
+porque o catálogo mora na tabela `assets`, não numa API em tempo de requisição.

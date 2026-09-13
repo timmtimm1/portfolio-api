@@ -118,25 +118,59 @@ um tempo parado demora ~1 min para acordar — normal, não é erro.
 
 ---
 
-## 4. Ligar o cron de snapshots do GitHub Actions
+## 4. Secrets do GitHub Actions
 
-O workflow `.github/workflows/snapshots.yml` já existe e já sabe chamar a API
-em produção — só está inativo por faltar os secrets.
+Dois workflows dependem de secrets. Enquanto faltarem, ambos rodam no horário,
+detectam a ausência e **pulam com um aviso** — não quebram nada, só não fazem
+nada.
 
 No GitHub: **Settings** → **Secrets and variables** → **Actions** →
-**New repository secret**, duas vezes:
+**New repository secret**.
+
+**Para `dados.yml`** (carrega catálogo e histórico no banco — sem isto a busca
+de ativos não devolve nada, porque o catálogo mora na tabela `assets`):
 
 | Secret | Valor |
 |---|---|
-| `API_URL` | a mesma URL pública do Render (sem `/` no final) |
-| `SERVICE_API_KEY` | o mesmo valor gerado no passo 3 |
+| `POSTGRES_HOST` | do passo 1 |
+| `POSTGRES_DB` | do passo 1 |
+| `POSTGRES_USER` | do passo 1 |
+| `POSTGRES_PASSWORD` | do passo 1 |
 
-Sem isso o workflow continua rodando (é agendado), só pula o disparo com um
-aviso — não quebra nada ficar para depois.
+`POSTGRES_PORT` e `POSTGRES_SSL` estão fixos no workflow — não são segredo.
+
+**Para `snapshots.yml`** (a foto diária da carteira):
+
+| Secret | Valor |
+|---|---|
+| `API_URL` | a URL pública do Render (sem `/` no final) |
+| `SERVICE_API_KEY` | o mesmo valor gerado no passo 3 |
 
 ---
 
-## 5. Testar
+## 5. Primeira carga de dados
+
+Um banco novo começa vazio. Dispare a carga **uma vez, à mão**:
+
+**Actions** → **"Carga do catalogo e do historico no banco"** → **Run workflow**.
+
+Leva menos de um minuto. A saída mostra o que entrou:
+
+```
+[seed] 151 ativos no catalogo
+[seed] 37408 cotacoes inseridas, 0 ignoradas
+```
+
+Daí em diante ele roda sozinho às 19h10 (BRT) nos dias úteis, pouco depois do
+pipeline do `mercado_financeiro` publicar os CSVs do dia. O seed é idempotente:
+rodar de novo não duplica nada.
+
+> O `scripts/atualizar_historico.sh` continua no repositório, mas carrega o
+> banco **local**, para desenvolvimento. Ele não toca em produção.
+
+---
+
+## 6. Testar
 
 ```bash
 curl https://SUA-URL.onrender.com/api/v1/health
@@ -157,8 +191,5 @@ sem afetar o que já está no ar.
 
 - **Domínio próprio**: o Render já dá HTTPS na URL `.onrender.com`; um domínio
   customizado é configuração extra do Render, não deste guia.
-- **Atualização de histórico de preços** (`scripts/atualizar_historico.sh`):
-  continua rodando via cron **local**, apontado para o Postgres do Neon (basta
-  usar as mesmas variáveis `POSTGRES_*` do passo 1 no `.env` da máquina que
-  roda o cron). Como o script grava direto no banco, funciona de qualquer PC —
-  só precisa rodar em pelo menos um deles com o crontab ativo.
+- **Domínio próprio** já está acima; fora isso, nada. A carga de dados de
+  mercado deixou de ser pendência: virou o workflow do passo 5.
