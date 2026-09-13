@@ -40,4 +40,16 @@ EXPOSE 8000
 
 # Sem --reload: reload observa o filesystem para recarregar o processo, o que
 # so faz sentido em desenvolvimento. Em producao e so overhead.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# `alembic upgrade head` roda ANTES do uvicorn, dentro do proprio CMD -- e nao
+# como "Pre-Deploy Command" do Render, porque esse recurso e pago e o plano
+# Free rejeita o blueprint que o usa. Rodar aqui e o padrao de contorno: a
+# migration aplica a cada boot do container, o que e seguro (idempotente --
+# vira no-op quando ja esta em head) porque o Free tier so mantem UMA
+# instancia por vez, sem duas rodando em paralelo por cima do mesmo banco.
+#
+# `exec` antes do uvicorn e o que faz o processo TROCAR de lugar do shell, em
+# vez de rodar como filho dele -- sem isso um SIGTERM do Render (ao reiniciar
+# ou desligar o servico) chegaria ao `sh`, nao ao uvicorn, e o desligamento
+# deixaria de ser gracioso.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

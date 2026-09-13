@@ -72,9 +72,14 @@ Se preferir outro provedor (Zoho, Outlook, um transacional como Resend), a
    - **Language/Runtime**: `Docker` (o `Dockerfile` já está no repo)
    - **Branch**: `main`
    - **Instance Type**: `Free`
-   - **Pre-Deploy Command**: `alembic upgrade head`
-     *(roda antes de cada deploy trocar de versão — é o que aplica migration
-     nova sem passo manual)*
+
+   Não existe passo de "Pre-Deploy Command" aqui: **o plano Free do Render não
+   suporta esse recurso** (é pago; um blueprint que o usa é rejeitado). A
+   migration entra de outro jeito — já está dentro do próprio `CMD` do
+   `Dockerfile` (`alembic upgrade head && exec uvicorn ...`), rodando a cada
+   boot do container, antes da API aceitar requisição. É seguro porque o Free
+   tier mantém uma instância só por vez, então não há duas rodando a mesma
+   migration ao mesmo tempo. Nada a configurar aqui — já vem pronto.
 4. **Environment** → adicione as variáveis abaixo. Os "❓" pedem um valor
    gerado ou escolhido por você:
 
