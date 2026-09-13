@@ -132,11 +132,21 @@
         <div class="busca-resultados" id="busca-resultados" hidden></div>
       </div>
       <div class="usuario">
-        <div class="usuario-txt">
-          <strong id="usuario-email">—</strong>
-          <span>Investidor</span>
+        <button type="button" class="usuario-chip" id="btn-usuario"
+                aria-haspopup="true" aria-expanded="false" aria-controls="usuario-menu">
+          <div class="usuario-txt">
+            <strong id="usuario-email">—</strong>
+            <span>Investidor</span>
+          </div>
+          <div class="avatar" id="avatar">—</div>
+        </button>
+        <!-- Sair vive aqui, e nao so no rodape da lateral: o rodape some abaixo
+             de 860px e fica cortado em tela baixa, entao quem entrasse na conta
+             errada nao tinha como sair. O cabecalho aparece em toda largura. -->
+        <div class="usuario-menu" id="usuario-menu" hidden>
+          <p class="usuario-menu-conta" id="usuario-menu-conta">—</p>
+          <button type="button" class="usuario-menu-item" id="btn-sair-menu">Sair desta conta</button>
         </div>
-        <div class="avatar" id="avatar">—</div>
       </div>
     </header>
 

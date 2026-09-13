@@ -281,6 +281,7 @@ async function entrarNoApp() {
   await carregarCarteiras();
   usuarioEmail = eu.email;
   $("#usuario-email").textContent = eu.email;
+  $("#usuario-menu-conta").textContent = eu.email;
   $("#avatar").textContent = eu.email.slice(0, 2).toUpperCase();
   await carregarVisao();
 
@@ -312,6 +313,7 @@ function marcarDemo(usuario) {
   // O e-mail sintético (demo-a1f3…@demo.invalid) não diz nada a ninguém e
   // ocupa o lugar onde a pessoa espera se reconhecer.
   $("#usuario-email").textContent = "Visitante";
+  $("#usuario-menu-conta").textContent = "Conta de demonstração";
   $("#avatar").textContent = "VC";
 
   const fim = new Date(usuario.expires_at).getTime();
@@ -496,11 +498,38 @@ $("#btn-reenviar").addEventListener("click", async () => {
   }
 });
 
-$("#btn-sair").addEventListener("click", async () => {
+async function sair() {
   // Revoga no servidor, não só limpa o cookie: uma cópia do refresh token
   // continuaria valendo por 30 dias.
   await fetch(`${API}/auth/logout`, { method: "POST" }).catch(() => {});
+  fecharMenuDoUsuario();
   mostrarLogin();
+}
+
+$("#btn-sair").addEventListener("click", sair);
+$("#btn-sair-menu").addEventListener("click", sair);
+
+/* ═══ Menu do usuário ═══ */
+
+function fecharMenuDoUsuario() {
+  $("#usuario-menu").hidden = true;
+  $("#btn-usuario").setAttribute("aria-expanded", "false");
+}
+
+$("#btn-usuario").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  const menu = $("#usuario-menu");
+  menu.hidden = !menu.hidden;
+  $("#btn-usuario").setAttribute("aria-expanded", String(!menu.hidden));
+});
+
+// Clicar fora e Escape fecham. Sem isso o menu fica aberto por cima do conteúdo
+// e a pessoa precisa acertar o mesmo botão de novo para se livrar dele.
+document.addEventListener("click", (ev) => {
+  if (!ev.target.closest(".usuario")) fecharMenuDoUsuario();
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") fecharMenuDoUsuario();
 });
 
 /* ═══ Navegação ═══ */
