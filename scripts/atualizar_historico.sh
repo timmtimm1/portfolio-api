@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Fecha o elo que faltava na cadeia de atualizacao.
+# Carga do historico no banco LOCAL, para desenvolvimento.
+#
+# ATENCAO: isto NAO atualiza producao. O banco de producao (Neon) e carregado
+# pelo GitHub Actions (`.github/workflows/dados.yml`), que roda sozinho e nao
+# depende de nenhuma maquina ligada. Rodar este script aqui e depois estranhar
+# que o painel no ar continua igual e o erro que o comentario existe para evitar.
+#
+# Fecha o elo que faltava na cadeia de atualizacao, no ambiente local.
 #
 # A geracao do CSV ja e automatica: o GitHub Actions do `mercado_financeiro`
 # roda de seg a sex as 18h15 (horario de Brasilia) e commita
