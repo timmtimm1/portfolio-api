@@ -955,3 +955,65 @@ class TestCarteiraSimuladaVisivel:
 
     def test_a_lista_marca_quais_sao_simuladas(self) -> None:
         assert "(simulada)" in self._js()
+
+
+class TestSairAlcancavel:
+    """Regressão: existia um "Sair", mas em telas reais ninguém o alcançava.
+
+    O único botão de sair vivia em `.lateral-rodape`. Duas regras de CSS o
+    tornavam inacessível, cada uma por conta própria:
+
+    1. `@media (max-width: 860px)` aplica `display: none` no rodapé inteiro --
+       em celular não havia como sair, ponto.
+    2. `.lateral` tem `height: 100vh` e não tinha `overflow-y`. Num notebook de
+       768px, o cartão de dica empurra o rodapé para além dos 100vh e ele fica
+       cortado, sem rolagem que o alcance.
+
+    O efeito prático: quem entrasse numa conta errada ficava preso nela, porque
+    a sessão é retomada sozinha pelo cookie httpOnly do refresh (30 dias) e a
+    tela de login nunca mais aparecia.
+    """
+
+    def _cabecalho(self) -> str:
+        html = (ESTATICOS / "index.html").read_text()
+        trecho = re.search(r'<header class="topo">(.*?)</header>', html, flags=re.DOTALL)
+        assert trecho is not None, "o cabeçalho `.topo` sumiu do painel"
+        return trecho.group(1)
+
+    def test_o_cabecalho_tem_saida_propria(self) -> None:
+        """O cabeçalho aparece em toda largura -- é o único lugar que sobrevive
+        ao breakpoint que apaga o rodapé da lateral."""
+        assert 'id="btn-sair-menu"' in self._cabecalho(), (
+            "sem um 'Sair' no cabeçalho, quem abrir o painel abaixo de 860px "
+            "não tem como trocar de conta: o rodapé da lateral está display:none"
+        )
+
+    def test_o_menu_mostra_em_qual_conta_se_esta(self) -> None:
+        """`.usuario-txt` some abaixo de 860px, então no celular o e-mail do
+        cabeçalho não é lido. O menu precisa dizer quem está logado -- é a
+        informação que faz alguém perceber que entrou na conta errada."""
+        assert 'id="usuario-menu-conta"' in self._cabecalho()
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert '$("#usuario-menu-conta").textContent = eu.email' in js
+
+    def test_a_lateral_rola_quando_nao_cabe(self) -> None:
+        css = (ESTATICOS / "style.css").read_text()
+        regra = re.search(r"^\.lateral \{([^}]*)\}", css, flags=re.MULTILINE)
+        assert regra is not None
+        corpo = regra.group(1)
+        if "height: 100vh" in corpo:
+            assert "overflow-y: auto" in corpo, (
+                "`.lateral` fixa 100vh sem rolagem: em tela baixa o rodapé com "
+                "o 'Sair' fica fora da área visível e é inalcançável"
+            )
+
+    def test_os_dois_botoes_saem_pelo_mesmo_caminho(self) -> None:
+        """Sair tem que revogar no servidor, não só esconder a tela: uma cópia
+        do refresh token continuaria valendo por 30 dias."""
+        js = _sem_comentarios((ESTATICOS / "app.js").read_text())
+        assert '$("#btn-sair").addEventListener("click", sair)' in js
+        assert '$("#btn-sair-menu").addEventListener("click", sair)' in js
+        corpo = re.search(r"async function sair\(\) \{(.*?)\n\}", js, flags=re.DOTALL)
+        assert corpo is not None
+        assert "/auth/logout" in corpo.group(1)
+        assert "mostrarLogin()" in corpo.group(1)
