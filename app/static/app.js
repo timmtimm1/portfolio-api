@@ -2097,6 +2097,12 @@ async function otimizar() {
   }
 }
 
+// Eixo da fronteira com uma casa, em pt-BR. Com retorno esperado vindo do
+// equilibrio (CDI + beta x premio), as carteiras ficam todas entre ~15% e
+// ~20% ao ano, e o arredondamento para inteiro repetia o rotulo
+// ("17% 17% 16% 16%") -- o eixo parecia quebrado.
+const pctDoEixo = (v) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+
 function ponto(carteira, cor, rotulo) {
   return {
     label: rotulo,
@@ -2155,12 +2161,12 @@ function desenharFronteira(r) {
       scales: {
         x: {
           grid: { color: GRADE, drawTicks: false }, border: { display: false },
-          ticks: { color: EIXO, callback: (v) => `${v.toFixed(0)}%` },
+          ticks: { color: EIXO, callback: pctDoEixo },
           title: { display: true, text: "Risco — volatilidade anualizada", color: EIXO, font: { size: 11 } },
         },
         y: {
           grid: { color: GRADE, drawTicks: false }, border: { display: false },
-          ticks: { color: EIXO, callback: (v) => `${v.toFixed(0)}%` },
+          ticks: { color: EIXO, callback: pctDoEixo },
           title: { display: true, text: "Retorno esperado anualizado", color: EIXO, font: { size: 11 } },
         },
       },
