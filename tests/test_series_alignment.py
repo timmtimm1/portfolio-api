@@ -10,7 +10,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, PriceHistory
-from app.services.metrics import SeriesAlinhadas
+from app.services.metrics import (
+    SeriesAlinhadas,
+    alinhar_com_indice,
+    covariancia_com_indice,
+    matriz_covariancia,
+)
 from app.services.series_service import carregar_series
 from tests.factories import criar_ativo
 
@@ -190,3 +195,99 @@ async def test_carregar_series_devolve_o_tipo_garantido(db: AsyncSession) -> Non
     # A invariante ja foi verificada na construcao; reconferimos aqui so para
     # deixar explicito o que o tipo esta prometendo.
     assert all(len(s) == len(series.datas) for s in series.precos.values())
+
+
+class TestAlinhamentoComIndice:
+    """O Ibovespa chega como variacao diaria e precisa casar com os precos.
+
+    O beta de cada ativo sai de `cov(ativo, indice)`; se o retorno do indice
+    de um dia for comparado com o retorno do ativo de outro, o beta mede ruido
+    -- e com ele o retorno de equilibrio inteiro.
+    """
+
+    @staticmethod
+    def _series(precos: dict[str, list[float]], datas: tuple[date, ...]) -> SeriesAlinhadas:
+        return SeriesAlinhadas(datas=datas, precos={t: np.array(p) for t, p in precos.items()})
+
+    def test_o_nivel_acumula_as_variacoes(self) -> None:
+        datas = _datas(4)
+        series = self._series({"A": [10, 11, 12, 13]}, datas)
+
+        resultado = alinhar_com_indice(series, dict.fromkeys(datas, 0.10))
+
+        assert resultado is not None
+        _, nivel = resultado
+        assert nivel == pytest.approx([1.1, 1.21, 1.331, 1.4641])
+
+    def test_dia_em_que_o_ativo_nao_negociou_entra_composto_no_indice(self) -> None:
+        """O ativo pulou o dia 1; o indice andou nele. O retorno do indice entre
+        os dias 0 e 2 tem que incluir o dia 1 (1,1 x 1,1 - 1 = 21%), senao o
+        ativo estaria sendo comparado com metade do movimento do mercado."""
+        todas = _datas(4)
+        series = self._series({"A": [10, 12, 13]}, (todas[0], todas[2], todas[3]))
+
+        resultado = alinhar_com_indice(series, dict.fromkeys(todas, 0.10))
+
+        assert resultado is not None
+        _, nivel = resultado
+        assert nivel[1] / nivel[0] - 1 == pytest.approx(0.21)
+
+    def test_dia_sem_indice_sai_da_amostra_dos_dois_lados(self) -> None:
+        datas = _datas(40)
+        series = self._series({"A": list(np.linspace(10, 20, 40))}, datas)
+        variacoes = {d: 0.001 for d in datas if d != datas[20]}
+
+        resultado = alinhar_com_indice(series, variacoes)
+
+        assert resultado is not None
+        recortadas, nivel = resultado
+        assert datas[20] not in recortadas.datas
+        assert len(recortadas) == len(nivel) == 39
+
+    def test_cobertura_insuficiente_devolve_none_em_vez_de_beta_torto(self) -> None:
+        datas = _datas(40)
+        series = self._series({"A": list(np.linspace(10, 20, 40))}, datas)
+
+        assert alinhar_com_indice(series, {d: 0.001 for d in datas[:20]}) is None
+        assert alinhar_com_indice(series, {}) is None
+
+    def test_variacao_fora_da_janela_nao_entra(self) -> None:
+        datas = _datas(5)
+        series = self._series({"A": [10, 11, 12, 13, 14]}, datas)
+        variacoes = dict.fromkeys(datas, 0.0)
+        variacoes[datas[0] - timedelta(days=1)] = 0.50
+
+        resultado = alinhar_com_indice(series, variacoes)
+
+        assert resultado is not None
+        assert resultado[1] == pytest.approx([1.0] * 5)
+
+    def test_indice_que_e_carteira_dos_ativos_tem_covariancia_sigma_w(self) -> None:
+        """Se o indice rende exatamente 60/40 dos dois ativos todo dia, a
+        covariancia de cada ativo com ele e Sigma w -- a identidade que liga a
+        conta pelo indice a formula classica de Black-Litterman."""
+        rng = np.random.default_rng(7)
+        datas = _datas(120)
+        retornos = rng.normal(0.0005, 0.015, (119, 2))
+        precos = 100 * np.vstack([np.ones(2), np.cumprod(1 + retornos, axis=0)])
+        series = self._series({"A": list(precos[:, 0]), "B": list(precos[:, 1])}, datas)
+        pesos = np.array([0.6, 0.4])
+        variacoes = {datas[0]: 0.0} | {
+            d: float(r @ pesos) for d, r in zip(datas[1:], retornos, strict=True)
+        }
+
+        resultado = alinhar_com_indice(series, variacoes)
+        assert resultado is not None
+        tickers, sigma, cov_mercado, var_mercado = covariancia_com_indice(*resultado)
+
+        assert tickers == ["A", "B"]
+        assert sigma == pytest.approx(matriz_covariancia(resultado[0])[1])
+        assert cov_mercado == pytest.approx(sigma @ pesos)
+        assert var_mercado == pytest.approx(float(pesos @ sigma @ pesos))
+
+    def test_indice_de_tamanho_errado_e_recusado(self) -> None:
+        datas = _datas(5)
+        series = self._series({"A": [10, 11, 12, 13, 14]}, datas)
+
+        with pytest.raises(ValueError, match="desalinhado"):
+            covariancia_com_indice(series, np.ones(4))
