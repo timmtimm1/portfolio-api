@@ -7,7 +7,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Query
 
-from app.core.deps import CarteiraAtual, CurrentUser, DbDep, ProvedorDep, SettingsDep
+from app.core.deps import (
+    BcbDep,
+    CarteiraAtual,
+    CurrentUser,
+    DbDep,
+    IbovDep,
+    ProvedorDep,
+    SettingsDep,
+)
 from app.schemas.metrics import PortfolioMetrics
 from app.schemas.optimization import OptimizationRequest, OptimizationResponse
 from app.schemas.rebalance import (
@@ -18,6 +26,7 @@ from app.schemas.rebalance import (
 )
 from app.schemas.simulation import ProjecaoPonto, SimulationRequest, SimulationResponse
 from app.services import (
+    benchmark_service,
     metrics_service,
     optimizer_service,
     portfolio_service,
@@ -38,6 +47,18 @@ router = APIRouter(tags=["metricas"])
 MAXIMO_ATIVOS = 50
 
 
+async def _taxa(db: DbDep, bcb: BcbDep, settings: SettingsDep) -> benchmark_service.TaxaLivreRisco:
+    """CDI mais recente, com o RISK_FREE_RATE do `.env` so como reserva.
+
+    Um lugar so para as tres rotas que usam taxa livre de risco: o Sharpe da
+    tela de metricas e o da fronteira tem que sair da MESMA taxa, senao a
+    mesma carteira mostra dois Sharpes diferentes em duas abas.
+    """
+    return await benchmark_service.taxa_livre_risco(
+        db, bcb, hoje=date_type.today(), reserva=settings.RISK_FREE_RATE
+    )
+
+
 @router.get(
     "/portfolio/metrics",
     response_model=PortfolioMetrics,
@@ -46,6 +67,7 @@ MAXIMO_ATIVOS = 50
 async def metricas_da_carteira(
     carteira: CarteiraAtual,
     db: DbDep,
+    bcb: BcbDep,
     settings: SettingsDep,
     desde: Annotated[date_type | None, Query(description="Inicio da janela (AAAA-MM-DD)")] = None,
     ate: Annotated[date_type | None, Query()] = None,
@@ -56,8 +78,9 @@ async def metricas_da_carteira(
     correlacionar historicos de tamanhos diferentes produz um numero com a forma
     certa e o significado errado.
     """
+    taxa = await _taxa(db, bcb, settings)
     return await metrics_service.metricas_da_carteira(
-        db, carteira.id, taxa_livre_risco=settings.RISK_FREE_RATE, desde=desde, ate=ate
+        db, carteira.id, taxa_livre_risco=taxa.valor, desde=desde, ate=ate
     )
 
 
@@ -69,6 +92,7 @@ async def metricas_da_carteira(
 async def metricas_de_ativos(
     _: CurrentUser,
     db: DbDep,
+    bcb: BcbDep,
     settings: SettingsDep,
     tickers: Annotated[
         list[str],
@@ -79,8 +103,9 @@ async def metricas_de_ativos(
 ) -> PortfolioMetrics:
     """Mesma analise para ativos que o usuario nao possui -- para avaliar antes
     de comprar. E a rota que o simulador da Etapa 9 vai consumir."""
+    taxa = await _taxa(db, bcb, settings)
     return await metrics_service.metricas(
-        db, tickers, taxa_livre_risco=settings.RISK_FREE_RATE, desde=desde, ate=ate
+        db, tickers, taxa_livre_risco=taxa.valor, desde=desde, ate=ate
     )
 
 
@@ -92,6 +117,8 @@ async def metricas_de_ativos(
 async def otimizar_carteira(
     carteira: CarteiraAtual,
     db: DbDep,
+    bcb: BcbDep,
+    ibov: IbovDep,
     settings: SettingsDep,
     pedido: Annotated[OptimizationRequest | None, Body()] = None,
 ) -> OptimizationResponse:
@@ -108,9 +135,11 @@ async def otimizar_carteira(
 
     ## O que o resultado significa, e o que nao significa
 
-    A fronteira e otima **para o passado observado**. O retorno esperado e
-    estimado sobre o historico, e essa estimativa e a parte fraca do modelo:
-    pequenas mudancas na janela produzem carteiras bem diferentes.
+    O retorno esperado vem de Black-Litterman: parte do equilibrio de mercado
+    (CDI + beta contra o Ibovespa x premio de risco, `premio_de_risco`, 5% ao
+    ano por padrao) e soma as opinioes informadas. Beta e covariancia saem da
+    janela observada, entao a fronteira ainda depende do passado -- menos do que
+    dependia da media historica, mas depende.
 
     A carteira de **minima variancia** e mais confiavel que a de maximo Sharpe,
     porque nao usa retorno esperado -- so covariancia, que e bem mais estavel.
@@ -124,7 +153,11 @@ async def otimizar_carteira(
     # assinatura seria construido UMA vez, no import, e compartilhado por todos
     # os requests -- a armadilha classica do argumento padrao mutavel em Python.
     return await optimizer_service.otimizar(
-        db, carteira.id, pedido or OptimizationRequest(), taxa_livre_risco=settings.RISK_FREE_RATE
+        db,
+        carteira.id,
+        pedido or OptimizationRequest(),
+        taxa=await _taxa(db, bcb, settings),
+        buscar_ibov=ibov.variacoes_diarias,
     )
 
 

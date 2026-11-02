@@ -10,24 +10,46 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.asset import Asset, PriceHistory
+from app.models.benchmark import BenchmarkRate, Indexador
 from app.schemas.optimization import MAXIMO_VISOES
-from tests.factories import criar_ativo, op, segunda_conta, usuario_logado
+from tests.conftest import CDI_DIARIO_FAKE, BcbFake, IbovFake
+from tests.factories import criar_ativo, op, segunda_conta, usuario_logado, variacao_do_ibov
+
+INICIO = date(2026, 1, 1)
 
 
-async def _serie(db: AsyncSession, ativo: Asset, dias: int = 200, semente: int = 1) -> None:
+def _beta_da_semente(semente: int) -> float:
+    """0,85; 1,10; 1,35... -- betas distintos e plausiveis para acao brasileira."""
+    return 0.6 + 0.25 * semente
+
+
+async def _serie(db: AsyncSession, ativo: Asset, dias: int = 200, semente: int = 1) -> list[float]:
+    """Precos que andam com o Ibovespa sintetico: beta x mercado + ruido proprio.
+
+    O retorno do dia d usa a variacao do Ibovespa do MESMO dia d, a mesma que
+    o `IbovFake` devolve. Com isso o beta medido pela rota tem que voltar perto
+    do beta de construcao -- e se o alinhamento por data escorregar um dia, o
+    beta cai para perto de zero e o teste de beta denuncia.
+
+    Devolve os precos como gravados (6 casas), para quem precisar recalcular
+    retornos exatos.
+    """
     rng = np.random.default_rng(semente)
-    precos = np.cumprod(1 + rng.normal(0.0006, 0.013, dias)) * 100
-    base = date(2026, 1, 1)
-    for i, preco in enumerate(precos):
-        db.add(
-            PriceHistory(
-                asset_id=ativo.id,
-                date=base + timedelta(days=i),
-                close=Decimal(str(round(float(preco), 6))),
-            )
-        )
+    beta = _beta_da_semente(semente)
+    datas = [INICIO + timedelta(days=i) for i in range(dias)]
+    retornos = np.array([beta * variacao_do_ibov(d) for d in datas]) + rng.normal(
+        0.0002, 0.010, dias
+    )
+    precos = np.cumprod(1 + retornos) * 100
+    gravados: list[float] = []
+    for dia, preco in zip(datas, precos, strict=True):
+        fechamento = Decimal(str(round(float(preco), 6)))
+        db.add(PriceHistory(asset_id=ativo.id, date=dia, close=fechamento))
+        gravados.append(float(fechamento))
     await db.commit()
+    return gravados
 
 
 async def _carteira_com(client: AsyncClient, db: AsyncSession, *tickers: str) -> dict[str, str]:
@@ -261,73 +283,203 @@ class TestMotivoDaRespostaVazia:
 
 
 class TestBlackLitterman:
-    """A rota passou a estimar retorno por Black-Litterman, nao pela media historica.
+    """A rota estima retorno por Black-Litterman, com o Ibovespa como mercado.
 
-    O que precisa ficar visivel na resposta: de onde veio o prior, e o que
-    aconteceu com as opinioes que o usuario mandou. Um modelo de retorno
-    esperado devolve numeros plausiveis de qualquer jeito -- se a interface so
-    mostra a curva, nao ha como distinguir "equilibrio do mercado" de "peso
-    igual porque faltou dado".
+    O que precisa ficar visivel na resposta: de onde veio o prior (CDI, beta e
+    premio), e o que aconteceu com as opinioes que o usuario mandou. Um modelo
+    de retorno esperado devolve numeros plausiveis de qualquer jeito -- a
+    versao anterior devolvia 25% a 64% ao ano para acoes brasileiras --, entao
+    aqui ha testes de identidade E testes de plausibilidade.
     """
 
-    async def _com_valor_de_mercado(
-        self, client: AsyncClient, db: AsyncSession, valores: dict[str, str]
-    ) -> dict[str, str]:
-        _, h = await usuario_logado(client)
-        for i, (ticker, valor) in enumerate(valores.items()):
-            ativo = await criar_ativo(db, ticker=ticker, market_cap=Decimal(valor))
-            await _serie(db, ativo, semente=i + 1)
-            await client.post("/transactions", json=op(ticker=ticker, quantity="10"), headers=h)
-        return h
-
-    async def test_resposta_traz_os_pesos_de_mercado(
-        self, client: AsyncClient, db: AsyncSession
-    ) -> None:
-        """300 bi contra 100 bi da 75% e 25%."""
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
-
-        corpo = (
-            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
+    async def _otimizar(
+        self, client: AsyncClient, h: dict[str, str], **corpo: object
+    ) -> dict[str, object]:
+        pedido = {"peso_maximo": 1.0} | corpo
+        resposta: dict[str, object] = (
+            await client.post("/portfolio/optimize", json=pedido, headers=h)
         ).json()
+        return resposta
 
-        equilibrio = corpo["equilibrio"]
-        assert equilibrio["pesos_mercado"]["PETR4"] == pytest.approx(0.75)
-        assert equilibrio["pesos_mercado"]["VALE3"] == pytest.approx(0.25)
-        assert sum(equilibrio["pesos_mercado"].values()) == pytest.approx(1.0)
-        assert equilibrio["usou_peso_igual"] is False
-
-    async def test_sem_valor_de_mercado_avisa_que_o_prior_nao_e_o_mercado(
+    async def test_equilibrio_e_cdi_mais_beta_vezes_premio_de_5(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
-        """Peso igual e uma aproximacao legitima; chama-la de "equilibrio de
-        mercado" sem ressalva nao e. O catalogo sem a pipeline de fundamentos
-        cai exatamente aqui."""
+        """A conta inteira do prior, com os numeros que a propria resposta traz."""
         h = await _carteira_com(client, db, "PETR4", "VALE3")
 
-        corpo = (
-            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
-        ).json()
+        corpo = await self._otimizar(client, h)
 
-        equilibrio = corpo["equilibrio"]
-        assert equilibrio["usou_peso_igual"] is True
-        assert sorted(equilibrio["sem_valor_de_mercado"]) == ["PETR4", "VALE3"]
-        assert equilibrio["pesos_mercado"]["PETR4"] == pytest.approx(0.5)
+        eq = corpo["equilibrio"]
+        assert isinstance(eq, dict)
+        rf = corpo["taxa_livre_risco"]
+        assert isinstance(rf, float)
+        assert eq["referencia"] == "Ibovespa"
+        assert eq["premio_de_risco"] == 0.05
+        assert set(eq["betas"]) == {"PETR4", "VALE3"}
+        for ticker, beta in eq["betas"].items():
+            assert eq["retorno_de_equilibrio"][ticker] == pytest.approx(rf + beta * 0.05)
+        assert eq["aversao_ao_risco"] == pytest.approx(0.05 / eq["volatilidade_mercado"] ** 2)
 
-    async def test_aversao_ao_risco_sai_na_faixa_plausivel(
+    async def test_o_beta_medido_e_o_da_construcao_da_serie(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
-        """Positiva sempre. Delta negativo inverteria o equilibrio inteiro sem
-        levantar erro nenhum -- e a serie sintetica dos testes pode perfeitamente
-        cair na janela."""
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        """Prova o alinhamento por data de ponta a ponta.
 
-        corpo = (
-            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
-        ).json()
+        As series foram feitas com beta 0,85 e 1,10 contra o Ibovespa do mesmo
+        dia. Se precos e indice escorregassem um dia, o beta medido cairia para
+        perto de zero. A folga de 0,2 e mais de tres erros-padrao.
+        """
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
-        delta = corpo["equilibrio"]["aversao_ao_risco"]
-        assert delta > 0
-        assert 0.5 <= delta <= 10.0
+        eq = (await self._otimizar(client, h))["equilibrio"]
+
+        assert isinstance(eq, dict)
+        assert eq["betas"]["PETR4"] == pytest.approx(_beta_da_semente(1), abs=0.2)
+        assert eq["betas"]["VALE3"] == pytest.approx(_beta_da_semente(2), abs=0.2)
+
+    async def test_retorno_de_equilibrio_fica_entre_o_cdi_e_cdi_mais_15(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """O teste de plausibilidade que teria pego a versao anterior.
+
+        Acao brasileira comum (beta entre 0,5 e 2) com premio de 5% tem que
+        esperar entre o CDI e CDI + 15% ao ano. A versao antiga devolvia ate
+        CDI + 54% com precos reais.
+        """
+        h = await _carteira_com(client, db, "PETR4", "VALE3", "ITUB4")
+
+        corpo = await self._otimizar(client, h)
+
+        rf = corpo["taxa_livre_risco"]
+        eq = corpo["equilibrio"]
+        assert isinstance(rf, float)
+        assert isinstance(eq, dict)
+        for ticker, retorno in eq["retorno_de_equilibrio"].items():
+            assert rf < retorno < rf + 0.15, f"{ticker}: {retorno:.1%}"
+
+    async def test_o_retorno_de_um_ativo_nao_depende_do_resto_da_carteira(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """A regressao principal.
+
+        Antes o "mercado" era a propria carteira, pesada por valor de mercado:
+        ITUB4 saia 16% ao lado de WEGE3 e 52% ao lado de VALE3 e PETR4, e PETR3
+        mais PETR4 contavam a Petrobras duas vezes. Agora o valor de mercado nem
+        entra, e o equilibrio de ITUB4 e o mesmo nos dois pedidos.
+        """
+        _, h = await usuario_logado(client)
+        for i, t in enumerate(("ITUB4", "WEGE3", "VALE3", "PETR4", "PETR3")):
+            capitalizacao = Decimal("700e9") if t.startswith("PETR") else None
+            await _serie(
+                db, await criar_ativo(db, ticker=t, market_cap=capitalizacao), semente=i + 1
+            )
+
+        a = await self._otimizar(client, h, tickers=["ITUB4", "WEGE3"])
+        b = await self._otimizar(client, h, tickers=["ITUB4", "VALE3", "PETR4", "PETR3"])
+
+        assert isinstance(a["equilibrio"], dict)
+        assert isinstance(b["equilibrio"], dict)
+        assert a["equilibrio"]["retorno_de_equilibrio"]["ITUB4"] == pytest.approx(
+            b["equilibrio"]["retorno_de_equilibrio"]["ITUB4"], abs=1e-12
+        )
+
+    async def test_sem_opiniao_a_carteira_otima_e_a_que_imita_o_ibovespa(
+        self, client: AsyncClient, db: AsyncSession, ibov: IbovFake
+    ) -> None:
+        """A identidade que define o modelo, e o teste mais forte do arquivo.
+
+        Aqui o Ibovespa E uma carteira 50/30/20 dos tres ativos, todo dia. Sem
+        opiniao, mu - rf = delta*cov(r, r_M) = delta*Sigma*w, e o maximo Sharpe
+        resolve w* ~ Sigma^-1 (mu - rf) = delta * w: normalizado, o proprio w.
+        Vale tambem com a covariancia posterior, que sem opiniao e (1+tau)*Sigma.
+
+        Uma assercao cobre a cadeia inteira: Ibovespa no banco -> alinhamento
+        -> cov com o indice -> delta -> pi -> mu -> otimizador. Errar data,
+        ordem dos tickers, transposicao, sinal ou escala em qualquer elo quebra
+        isto. Teto folgado (1.0) porque a restricao, se apertar, e quem manda.
+        """
+        _, h = await usuario_logado(client)
+        pesos = {"ITUB4": 0.5, "PETR4": 0.3, "VALE3": 0.2}
+        precos: dict[str, np.ndarray] = {}
+        for i, t in enumerate(pesos):
+            precos[t] = np.array(await _serie(db, await criar_ativo(db, ticker=t), semente=i + 1))
+            await client.post("/transactions", json=op(ticker=t, quantity="10"), headers=h)
+
+        retornos = {t: p[1:] / p[:-1] - 1 for t, p in precos.items()}
+        datas = [INICIO + timedelta(days=i) for i in range(len(precos["ITUB4"]))]
+        db.add(BenchmarkRate(indexador=Indexador.IBOV, date=datas[0], rate=Decimal(0)))
+        for k, dia in enumerate(datas[1:]):
+            r = sum(w * retornos[t][k] for t, w in pesos.items())
+            db.add(BenchmarkRate(indexador=Indexador.IBOV, date=dia, rate=Decimal(f"{r:.10f}")))
+        await db.commit()
+
+        corpo = await self._otimizar(client, h)
+
+        assert ibov.chamadas == [], "o Ibovespa do banco cobria a janela"
+        otima = corpo["maximo_sharpe"]
+        assert isinstance(otima, dict)
+        for ticker, peso in pesos.items():
+            assert otima["pesos"][ticker] == pytest.approx(peso, abs=1e-4), (
+                f"{ticker}: otima {otima['pesos'][ticker]:.4f} != indice {peso:.4f}"
+            )
+
+    async def test_premio_de_risco_e_editavel(self, client: AsyncClient, db: AsyncSession) -> None:
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
+
+        corpo = await self._otimizar(client, h, premio_de_risco=0.08)
+
+        rf = corpo["taxa_livre_risco"]
+        eq = corpo["equilibrio"]
+        assert isinstance(rf, float)
+        assert isinstance(eq, dict)
+        assert eq["premio_de_risco"] == 0.08
+        for ticker, beta in eq["betas"].items():
+            assert eq["retorno_de_equilibrio"][ticker] == pytest.approx(rf + beta * 0.08)
+
+    async def test_premio_fora_da_faixa_e_recusado(self, client: AsyncClient) -> None:
+        """Zero zera todo excedente; acima de 15% a premissa vira aposta."""
+        _, h = await usuario_logado(client)
+        for valor in (0, -0.01, 0.20):
+            resp = await client.post(
+                "/portfolio/optimize", json={"premio_de_risco": valor}, headers=h
+            )
+            assert resp.status_code == 422, valor
+
+    async def test_sem_ibovespa_explica_em_vez_de_inventar(
+        self, client: AsyncClient, db: AsyncSession, ibov: IbovFake
+    ) -> None:
+        """Sem o indice nao ha equilibrio. A versao antiga caia em "peso
+        igual" e seguia; aqui a resposta diz o que faltou."""
+        ibov.falha = True
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
+
+        corpo = await self._otimizar(client, h)
+
+        assert corpo["fronteira"] == []
+        assert corpo["equilibrio"] is None
+        assert "Ibovespa" in str(corpo["motivo"])
+
+    async def test_a_taxa_livre_de_risco_e_o_cdi_do_banco_central(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
+
+        corpo = await self._otimizar(client, h)
+
+        esperado = (1 + float(CDI_DIARIO_FAKE)) ** 252 - 1
+        assert corpo["taxa_livre_risco"] == pytest.approx(esperado)
+        assert "CDI de" in str(corpo["fonte_taxa_livre_risco"])
+
+    async def test_bcb_fora_usa_a_reserva_e_diz_isso(
+        self, client: AsyncClient, db: AsyncSession, bcb: BcbFake
+    ) -> None:
+        bcb.falha = True
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
+
+        corpo = await self._otimizar(client, h)
+
+        assert corpo["taxa_livre_risco"] == get_settings().RISK_FREE_RATE
+        assert "reserva" in str(corpo["fonte_taxa_livre_risco"])
 
     async def test_opiniao_otimista_puxa_o_peso_do_ativo_para_cima(
         self, client: AsyncClient, db: AsyncSession
@@ -337,7 +489,7 @@ class TestBlackLitterman:
         Sem ele, todo o resto poderia passar com as visoes sendo lidas,
         validadas, contadas -- e descartadas antes do otimizador.
         """
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         sem = (
             await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
@@ -358,7 +510,7 @@ class TestBlackLitterman:
     ) -> None:
         """O par do teste acima. Se o codigo somasse o valor absoluto da
         discordancia em vez de respeitar o sinal, so um dos dois falharia."""
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         sem = (
             await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
@@ -375,7 +527,7 @@ class TestBlackLitterman:
 
     async def test_opiniao_relativa_e_aceita(self, client: AsyncClient, db: AsyncSession) -> None:
         """ "PETR4 supera VALE3 em 10 pontos" -- coeficientes somando zero."""
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         corpo = (
             await client.post(
@@ -401,7 +553,7 @@ class TestBlackLitterman:
         transforma "PETR4 supera BBAS3 em 10 pontos" em "PETR4 rende 10%", uma
         afirmacao que ele nunca fez.
         """
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         corpo = (
             await client.post(
@@ -421,7 +573,7 @@ class TestBlackLitterman:
     async def test_ticker_da_opiniao_e_normalizado(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         corpo = (
             await client.post(
@@ -438,7 +590,7 @@ class TestBlackLitterman:
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
         """Lista vazia e o caso comum: o resultado e o equilibrio puro."""
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         corpo = (
             await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
@@ -447,37 +599,6 @@ class TestBlackLitterman:
         assert corpo["visoes_aplicadas"] == 0
         assert len(corpo["fronteira"]) > 0
         assert corpo["maximo_sharpe"] is not None
-
-    async def test_sem_opiniao_a_carteira_otima_E_a_carteira_de_mercado(
-        self, client: AsyncClient, db: AsyncSession
-    ) -> None:
-        """A identidade que define o modelo, e o teste mais forte do arquivo.
-
-        Sem opiniao, mu - rf = delta*Sigma*w. O maximo Sharpe resolve
-        w* ~ Sigma^-1 (mu - rf) = delta * w, que normalizado E o proprio w de
-        mercado. Vale exato, e vale tambem com a covariancia posterior, porque
-        sem opiniao ela e (1+tau)*Sigma e a constante some na normalizacao.
-
-        Uma assercao cobre a cadeia inteira: valor de mercado no banco -> pesos
-        -> delta -> pi -> mu -> otimizador. Errar a ordem dos tickers, a
-        transposicao, o sinal ou a escala em qualquer elo quebra isto. Precisa
-        de teto folgado (1.0) porque a restricao, se apertar, e quem manda.
-        """
-        h = await self._com_valor_de_mercado(
-            client, db, {"PETR4": "300e9", "VALE3": "150e9", "ITUB4": "50e9"}
-        )
-
-        corpo = (
-            await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
-        ).json()
-
-        mercado = corpo["equilibrio"]["pesos_mercado"]
-        otima = corpo["maximo_sharpe"]["pesos"]
-        assert mercado["PETR4"] == pytest.approx(0.60)
-        for ticker, peso in mercado.items():
-            assert otima[ticker] == pytest.approx(peso, abs=1e-4), (
-                f"{ticker}: otima {otima[ticker]:.4f} != mercado {peso:.4f}"
-            )
 
     async def test_retorno_esperado_sai_em_retorno_TOTAL(
         self, client: AsyncClient, db: AsyncSession
@@ -491,7 +612,7 @@ class TestBlackLitterman:
         (retorno - rf) do numerador fica negativo e a carteira de MAXIMO Sharpe
         passa a ter Sharpe negativo, que e uma contradicao em termos.
         """
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         corpo = (
             await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)
@@ -516,7 +637,7 @@ class TestBlackLitterman:
         nenhum outro percebe -- o efeito e de poucos por cento e nao aparece em
         assercao de estrutura.
         """
-        h = await self._com_valor_de_mercado(client, db, {"PETR4": "300e9", "VALE3": "100e9"})
+        h = await _carteira_com(client, db, "PETR4", "VALE3")
 
         sem = (
             await client.post("/portfolio/optimize", json={"peso_maximo": 1.0}, headers=h)

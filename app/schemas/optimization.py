@@ -7,6 +7,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.black_litterman import PREMIO_DE_RISCO_PADRAO
+
 # Faixa do limite por ativo. Abaixo de 5% a carteira vira uma pulverizacao
 # inexecutavel (dezenas de posicoes minusculas); 100% permite concentrar tudo
 # num papel, que o usuario pode querer, mas conscientemente.
@@ -25,6 +27,13 @@ MAXIMO_ATIVOS_POR_VISAO = 10
 # domina o equilibrio inteiro e produz uma carteira sem sentido.
 VISAO_RETORNO_MINIMO = -0.95
 VISAO_RETORNO_MAXIMO = 3.0
+
+# Teto do premio de risco da bolsa sobre o CDI, ao ano. Acima de 15% a premissa
+# deixa de ser premio e vira aposta: o retorno de equilibrio de uma acao comum
+# passaria de CDI + 15%, mais do que o Ibovespa entregou em qualquer decada.
+# Zero fica de fora porque risco que nao paga nada zera todos os excedentes e o
+# maximo Sharpe perde o sentido.
+PREMIO_DE_RISCO_MAXIMO = 0.15
 
 
 class Visao(BaseModel):
@@ -101,6 +110,15 @@ class OptimizationRequest(BaseModel):
         max_length=MAXIMO_VISOES,
         description="Opinioes sobre retorno futuro. Vazio = so o equilibrio de mercado.",
     )
+    premio_de_risco: float = Field(
+        default=PREMIO_DE_RISCO_PADRAO,
+        gt=0,
+        le=PREMIO_DE_RISCO_MAXIMO,
+        description=(
+            "Quanto a bolsa rende acima do CDI por ano, em fracao (0.05 = 5%). "
+            "E premissa, nao medida: define o retorno de equilibrio de cada ativo."
+        ),
+    )
 
 
 class CarteiraSugerida(BaseModel):
@@ -121,22 +139,29 @@ class EquilibrioResumo(BaseModel):
     """De onde saiu o retorno esperado, ANTES das opinioes.
 
     Existe porque Black-Litterman e uma caixa-preta se a interface so mostrar a
-    curva. O usuario precisa poder ver que a carteira sugerida parte dos pesos
-    de mercado, e precisa saber quando ela NAO parte disso -- que e o caso
-    quando faltou valor de mercado e o modelo caiu para peso igual.
+    curva. A conta do equilibrio cabe numa frase -- CDI + beta x premio -- e a
+    resposta traz os tres pedacos para a tela poder mostra-la com os numeros
+    deste calculo.
     """
 
-    pesos_mercado: dict[str, float]
+    referencia: str = "Ibovespa"
+    """Indice usado como carteira de mercado."""
+
+    premio_de_risco: float
+    """Premio anual do mercado sobre a taxa livre de risco (premissa)."""
+
     aversao_ao_risco: float
-    """delta da otimizacao reversa. Referencia da literatura: ~2,5."""
+    """delta = premio / variancia do mercado. Com Ibovespa a ~22% de vol e 5%
+    de premio, fica perto de 1."""
 
-    usou_peso_igual: bool
-    """True quando faltou valor de mercado e o prior deixou de ser o mercado."""
+    volatilidade_mercado: float
+    """Volatilidade anualizada do indice na janela do calculo."""
 
-    usou_delta_padrao: bool
-    """True quando o delta amostral saiu fora da faixa e caiu no 2,5."""
+    betas: dict[str, float]
+    """Quanto cada ativo acompanha o indice nesta janela."""
 
-    sem_valor_de_mercado: list[str]
+    retorno_de_equilibrio: dict[str, float]
+    """Retorno TOTAL de equilibrio por ativo: taxa livre + beta x premio."""
 
 
 class OptimizationResponse(BaseModel):
@@ -144,6 +169,8 @@ class OptimizationResponse(BaseModel):
     fim: date_type | None
     pregoes: int
     taxa_livre_risco: float
+    fonte_taxa_livre_risco: str | None = None
+    """De onde veio a taxa: o CDI de uma data, ou a reserva da configuracao."""
     peso_maximo: float
     tickers: list[str]
 
@@ -180,12 +207,12 @@ class OptimizationResponse(BaseModel):
 
     aviso: str = Field(
         default=(
-            "Retorno esperado por Black-Litterman: parte do equilíbrio implícito nos "
-            "pesos de mercado e incorpora as opiniões informadas. A covariância vem do "
-            "histórico observado, e o prêmio de risco do mercado também -- desempenho "
-            "passado não garante desempenho futuro. As opiniões são suas: o modelo "
-            "propaga o que você afirmou, não verifica. Isto não é recomendação de "
-            "investimento."
+            "Retorno esperado por Black-Litterman: parte do equilíbrio de mercado — "
+            "CDI mais o beta de cada ativo contra o Ibovespa vezes um prêmio de risco "
+            "(premissa, 5% ao ano por padrão) — e incorpora as opiniões informadas. "
+            "Beta e covariância vêm do histórico observado, e desempenho passado não "
+            "garante desempenho futuro. As opiniões são suas: o modelo propaga o que "
+            "você afirmou, não verifica. Isto não é recomendação de investimento."
         ),
         description="Limitacao do modelo, devolvida sempre",
     )
