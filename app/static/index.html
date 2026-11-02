@@ -385,6 +385,19 @@
               <option value="1">Sem limite</option>
             </select>
           </label>
+          <!-- Prêmio da bolsa sobre o CDI: a premissa que define o retorno de
+               equilíbrio (CDI + beta x prêmio). 5% é o padrão da API; a faixa
+               de 3% a 8% cobre o que se usa para o Brasil. -->
+          <label class="controle">
+            <span>Prêmio da bolsa</span>
+            <select id="premio-risco">
+              <option value="0.03">3% a.a.</option>
+              <option value="0.04">4% a.a.</option>
+              <option value="0.05" selected>5% a.a.</option>
+              <option value="0.06">6% a.a.</option>
+              <option value="0.08">8% a.a.</option>
+            </select>
+          </label>
           <button class="btn btn--primario btn--pequeno" id="btn-otimizar">Recalcular</button>
         </div>
       </div>
@@ -409,8 +422,8 @@
 
       <!-- Escondido quando `equilibrio` vem nulo (fronteira vazia, sem
            calculo nenhum) -- nao ha o que explicar de um calculo que nao
-           rodou. `#explicacao-equilibrio` conta o que aconteceu NESTE
-           calculo (mercado de verdade ou peso igual, qual aversao ao risco);
+           rodou. `#explicacao-equilibrio` mostra a conta DESTE calculo
+           (taxa livre + beta x premio, ativo por ativo);
            `#aviso-modelo` e a limitacao generica do metodo, que a API manda
            sempre. -->
       <article class="cartao-explicacao" id="explicacao-modelo" hidden>
