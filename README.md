@@ -266,7 +266,7 @@ que os torna trivialmente testáveis e impossíveis de quebrar por acidente.
 | **`services/position.py`** | O preço médio brasileiro. Compra aumenta o custo; **venda não muda o preço médio** — mexe no resultado realizado. Taxa de compra entra no custo, taxa de venda sai do lucro. |
 | **`services/metrics.py`** | Volatilidade, correlação, covariância. 252 pregões por ano, desvio-padrão *amostral*, retorno *geométrico* (CAGR) e não média simples. |
 | **`services/optimizer.py`** | Média-variância. Recebe retornos esperados e covariância, devolve pesos. Resolve 50 problemas de otimização (SLSQP) para desenhar a fronteira. |
-| **`services/black_litterman.py`** | De onde vem o retorno esperado. Parte do equilíbrio implícito nos pesos de mercado (π = δΣw) e combina com opiniões, cada uma pesando pela incerteza do próprio mercado. Sem opinião, a carteira ótima **é** a de mercado. |
+| **`services/black_litterman.py`** | De onde vem o retorno esperado. Parte do equilíbrio de mercado — CDI + beta contra o Ibovespa × prêmio de risco (π = β × 5% por padrão) — e combina com opiniões, cada uma pesando pela incerteza do próprio mercado. Sem opinião, a carteira ótima é a combinação dos seus ativos que mais se parece com o Ibovespa. |
 | **`services/dividend.py`** | Quanto você recebeu, dada a data-com. E o desconto de 15% quando é JCP. |
 | **`services/split.py`** | Reescreve o livro nos termos de hoje. 100 ações antes de um 2:1 viram 200 a metade do preço — **e o custo total não muda**. |
 | **`services/rebalance.py`** | Do peso ideal para a ordem concreta. Ninguém compra 40%; compra 12 ações. |
@@ -317,8 +317,10 @@ risco e a de melhor relação risco-retorno. O ponto âmbar é a **sua** carteir
 normalmente fora da curva, que é o ponto do exercício.
 
 O retorno esperado de cada ativo não é a média do passado: vem do **Black-Litterman**,
-que parte do equilíbrio implícito nos preços de mercado. Por isso, sem nenhuma opinião
-informada, a carteira de melhor relação risco-retorno é a própria carteira de mercado.
+que parte do equilíbrio de mercado — o CDI mais o quanto o ativo acompanha o Ibovespa
+(o beta) vezes um prêmio de 5% ao ano, que dá para trocar na tela. Por isso, sem nenhuma
+opinião informada, a carteira de melhor relação risco-retorno é a combinação dos seus
+ativos que mais se parece com o Ibovespa.
 
 ![Fronteira eficiente](docs/img/fronteira.jpg)
 
@@ -383,8 +385,17 @@ passado. O otimizador amplifica erro no retorno esperado muito mais que na covar
 e a média histórica de um ativo é uma estimativa ruim — com ela, a carteira "ótima"
 concentrava no papel que por acaso mais subiu na janela. O Black-Litterman inverte a
 pergunta: que retorno o mercado precisa estar esperando para que os preços de hoje façam
-sentido? A resposta sai dos pesos de mercado e da covariância, sem média de ativo
-nenhum. Sobre esse equilíbrio entram as opiniões do investidor — por enquanto, só pela API.
+sentido? A resposta é **CDI + beta × prêmio**: o beta de cada ativo contra o Ibovespa,
+medido na mesma janela da covariância, e um prêmio de risco declarado (5% ao ano sobre o
+CDI por padrão), sem média de ativo nenhum. Sobre esse equilíbrio entram as opiniões do
+investidor — por enquanto, só pela API.
+
+A primeira versão usava como "mercado" os próprios ativos da carteira, pesados pelo valor
+de mercado, e tirava o prêmio do retorno passado deles. Com preços reais de 2025–2026 isso
+dava ações brasileiras rendendo de 25% a 64% ao ano, o retorno de ITUB4 mudava de 16% para
+52% conforme os vizinhos da carteira, e PETR3 + PETR4 contavam a Petrobras duas vezes. A
+taxa livre de risco também deixou de ser um número fixo no `.env` (que tinha ficado em 10%
+com a Selic a 13,75%): agora é o CDI mais recente do Banco Central.
 
 **Como o código calcula** (`services/optimizer.py`): escolhe um retorno-alvo, pergunta
 qual combinação o atinge com a menor volatilidade, e repete **50 vezes**. Sujeito a três
@@ -395,8 +406,8 @@ por média histórica, o otimizador jogava quase tudo no papel que mais subiu na
 matematicamente ótimo para o passado, e o oposto de diversificar. O Black-Litterman
 atacou a causa; o teto continua como rede.
 
-> **A limitação que o código não esconde:** a covariância e o prêmio de risco do mercado
-> ainda saem do histórico, e o passado não estima o futuro. O Black-Litterman deixa a
+> **A limitação que o código não esconde:** a covariância e os betas ainda saem do
+> histórico, o prêmio de risco é uma premissa, e o passado não estima o futuro. O Black-Litterman deixa a
 > carteira ótima muito menos sensível à janela escolhida, mas não a torna certa. O valor
 > da fronteira é **mostrar o trade-off**, não entregar a resposta.
 
@@ -463,6 +474,7 @@ a única categoria de defeito que realmente assusta num app de dinheiro.
 | Sincronizar duas vezes duplicava provento | Reclassificar liberava a vaga na chave primária, e a segunda sincronização reinseria |
 | Um dia sem cotação virava queda de 21% | O snapshot usava o custo como valor de mercado, inflando a volatilidade de 5,5% para 59,9% |
 | A posição mostrava metade das ações | Desdobramento muda a quantidade sem nenhuma transação acontecer |
+| Ações brasileiras com retorno esperado de 25% a 64% ao ano | O Black-Litterman usava a própria carteira como "mercado" e tirava o prêmio do ano que passou; os testes conferiam fórmulas com números inventados, e a conta estava certa — a calibração, não |
 
 Cada um virou um teste com nome próprio. É por isso que a suíte tem 507 testes para
 8.616 linhas de código.

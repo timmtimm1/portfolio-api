@@ -2,8 +2,8 @@
 
 O `mu` vem de Black-Litterman (`app/services/black_litterman.py`), nao da media
 historica. Este modulo e quem busca os ingredientes que o modelo puro nao pode
-buscar sozinho -- valor de mercado no catalogo, series de preco -- e quem traduz
-opiniao por ticker em matriz posicional.
+buscar sozinho -- series de preco, o Ibovespa da mesma janela, a taxa livre de
+risco -- e quem traduz opiniao por ticker em matriz posicional.
 """
 
 from __future__ import annotations
@@ -12,10 +12,9 @@ import uuid
 from collections.abc import Sequence
 
 import numpy as np
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset
+from app.models.benchmark import Indexador
 from app.schemas.optimization import (
     CarteiraSugerida,
     EquilibrioResumo,
@@ -24,11 +23,11 @@ from app.schemas.optimization import (
     Visao,
 )
 from app.services import black_litterman, series_service, transaction_service
+from app.services.benchmark_service import BuscarTaxas, TaxaLivreRisco, taxas_do_periodo
 from app.services.metrics import (
     MINIMO_OBSERVACOES,
-    SeriesAlinhadas,
-    matriz_covariancia,
-    retorno_anualizado,
+    alinhar_com_indice,
+    covariancia_com_indice,
 )
 from app.services.optimizer import (
     Carteira,
@@ -58,42 +57,6 @@ def _sugerida(carteira: Carteira, tickers: list[str]) -> CarteiraSugerida:
         volatilidade=carteira.volatilidade,
         indice_sharpe=carteira.indice_sharpe,
     )
-
-
-def _retornos_historicos(series: SeriesAlinhadas, tickers: list[str]) -> np.ndarray:
-    """Retorno anualizado observado, por ativo.
-
-    ATENCAO ao que este vetor virou. Ele JA FOI o `mu` entregue ao otimizador --
-    o Markowitz classico, com a fraqueza conhecida de que pequenas mudancas na
-    janela produzem carteiras bem diferentes. Hoje ele nao chega perto do
-    otimizador: serve apenas para calcular UM numero, o retorno da carteira de
-    mercado, que por sua vez alimenta a aversao ao risco.
-
-    A diferenca importa. Uma media por ativo tem erro-padrao enorme e o
-    otimizador amplifica esse erro; a media da carteira de mercado inteira e
-    uma estimativa muito mais estavel, e entra numa divisao que so calibra a
-    escala do premio de risco. Reintroduzir este vetor como `mu` desfaria a
-    troca inteira.
-    """
-    return np.array([retorno_anualizado(series.precos[t]) for t in tickers], dtype=np.float64)
-
-
-async def _valores_de_mercado(db: AsyncSession, tickers: list[str]) -> list[float | None]:
-    """Valor de mercado de cada ticker, na ORDEM recebida.
-
-    A ordem e o contrato: o vetor de pesos que sai disto multiplica a matriz de
-    covariancia posicionalmente. Devolver um dicionario e deixar o chamador
-    reordenar abriria a mesma porta que `_sugerida` fecha -- numero certo no
-    ativo errado, plausivel demais para alguem notar.
-
-    Decimal vira float aqui, e este e o lugar certo: a fronteira entre o
-    dinheiro guardado no banco e a estatistica do modelo.
-    """
-    linhas = (
-        await db.execute(select(Asset.ticker, Asset.market_cap).where(Asset.ticker.in_(tickers)))
-    ).all()
-    por_ticker = {ticker: valor for ticker, valor in linhas}
-    return [None if por_ticker.get(t) is None else float(por_ticker[t]) for t in tickers]
 
 
 def _matriz_de_visoes(
@@ -141,14 +104,20 @@ async def otimizar(
     portfolio_id: uuid.UUID,
     pedido: OptimizationRequest,
     *,
-    taxa_livre_risco: float,
+    taxa: TaxaLivreRisco,
+    buscar_ibov: BuscarTaxas,
 ) -> OptimizationResponse:
     """Fronteira eficiente, minima variancia e maximo Sharpe.
 
     Quando `tickers` nao e informado, usa os ativos em carteira e devolve
     tambem a carteira atual do usuario avaliada com os mesmos parametros --
     que e o que permite ao grafico mostrar "voce esta aqui, a fronteira esta ali".
+
+    `buscar_ibov` e quem sabe trazer o Ibovespa do fornecedor quando o banco
+    nao cobre a janela -- injetado, como nas outras rotas, para o teste rodar
+    sem rede.
     """
+    taxa_livre_risco = taxa.valor
     da_carteira = pedido.tickers is None
     posicoes = await transaction_service.posicoes(db, portfolio_id)
     abertas = [p for p in posicoes if not p.esta_zerada]
@@ -165,6 +134,7 @@ async def otimizar(
             fim=None,
             pregoes=0,
             taxa_livre_risco=taxa_livre_risco,
+            fonte_taxa_livre_risco=taxa.fonte,
             peso_maximo=pedido.peso_maximo,
             tickers=[],
             fronteira=[],
@@ -206,25 +176,38 @@ async def otimizar(
     # `subconjunto` preserva o alinhamento -- remontar o dicionario a mao seria a
     # brecha por onde series desalinhadas voltariam a virar covariancia errada.
     usadas = series.subconjunto(aptos)
-    tickers, cov_amostral = matriz_covariancia(usadas)
 
     # --- Black-Litterman -----------------------------------------------------
     #
-    # O retorno da CARTEIRA DE MERCADO e a unica media historica que sobrevive,
-    # e ela entra so no denominador da aversao ao risco. Ver `_retornos_historicos`.
-    valores = await _valores_de_mercado(db, tickers)
-    pesos_mercado, _ = black_litterman.pesos_de_mercado(valores)
-    retorno_mercado = float(pesos_mercado @ _retornos_historicos(usadas, tickers))
+    # O mercado e o Ibovespa, na MESMA janela dos precos. A covariancia dos
+    # ativos e a de cada um com o indice saem de uma unica amostra: os dias em
+    # que existem as duas coisas.
+    variacoes = await taxas_do_periodo(
+        db, Indexador.IBOV, usadas.inicio, usadas.fim, buscar=buscar_ibov
+    )
+    alinhadas = alinhar_com_indice(usadas, {d: float(v) for d, v in variacoes.items()})
+    if alinhadas is None or len(alinhadas[0]) <= MINIMO_OBSERVACOES:
+        return vazio(
+            "Sem a serie do Ibovespa para este periodo, nao ha como calcular o "
+            "equilibrio de mercado. Tente de novo em alguns minutos."
+        )
+    usadas, nivel_ibov = alinhadas
+    tickers, cov_amostral, cov_com_ibov, var_ibov = covariancia_com_indice(usadas, nivel_ibov)
 
     p_visoes, q_visoes, visoes_ignoradas = _matriz_de_visoes(pedido.visoes, tickers)
-    posterior = black_litterman.black_litterman(
-        cov_amostral,
-        valores,
-        retorno_mercado=retorno_mercado,
-        taxa_livre_risco=taxa_livre_risco,
-        p=p_visoes,
-        q_total=q_visoes,
-    )
+    try:
+        posterior = black_litterman.black_litterman(
+            cov_amostral,
+            cov_com_ibov,
+            var_ibov,
+            taxa_livre_risco=taxa_livre_risco,
+            premio_de_risco=pedido.premio_de_risco,
+            p=p_visoes,
+            q_total=q_visoes,
+        )
+    except ValueError:
+        # So acontece com o Ibovespa parado a janela inteira -- dado quebrado.
+        return vazio("A serie do Ibovespa neste periodo nao tem variacao. Confira os dados.")
 
     # `mu` volta a ser retorno TOTAL aqui, que e a convencao do otimizador e de
     # `carteira_para`. A travessia acontece uma vez so, com nome.
@@ -235,12 +218,14 @@ async def otimizar(
     # visoes de mundo.
     cov = posterior.cov
 
+    eq = posterior.equilibrio
+    pi_total = black_litterman.retorno_total(eq.pi, taxa_livre_risco)
     equilibrio = EquilibrioResumo(
-        pesos_mercado={t: float(w) for t, w in zip(tickers, pesos_mercado, strict=True)},
-        aversao_ao_risco=posterior.equilibrio.delta,
-        usou_peso_igual=posterior.equilibrio.usou_peso_igual,
-        usou_delta_padrao=posterior.equilibrio.usou_delta_padrao,
-        sem_valor_de_mercado=[tickers[i] for i in posterior.equilibrio.sem_valor_de_mercado],
+        premio_de_risco=eq.premio_de_risco,
+        aversao_ao_risco=eq.delta,
+        volatilidade_mercado=float(np.sqrt(eq.variancia_mercado)),
+        betas={t: float(b) for t, b in zip(tickers, eq.betas, strict=True)},
+        retorno_de_equilibrio={t: float(r) for t, r in zip(tickers, pi_total, strict=True)},
     )
 
     try:
@@ -270,6 +255,7 @@ async def otimizar(
         fim=usadas.fim,
         pregoes=len(usadas),
         taxa_livre_risco=taxa_livre_risco,
+        fonte_taxa_livre_risco=taxa.fonte,
         peso_maximo=pedido.peso_maximo,
         tickers=tickers,
         fronteira=[_sugerida(c, tickers) for c in fronteira],

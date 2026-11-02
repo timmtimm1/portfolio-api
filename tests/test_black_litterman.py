@@ -1,17 +1,21 @@
 """Testes do modelo de Black-Litterman.
 
 Modulo puro: entra numero, sai numero. Os casos foram montados para fechar na
-calculadora -- covariancia diagonal de 0,04 com pesos 50/50 da variancia de
-mercado 0,02, e com premio de 5% ao ano o delta sai 2,5 exato, que por acaso e
-o valor de referencia da literatura.
+calculadora -- covariancia diagonal de 0,04 e um mercado meio a meio entre os
+dois ativos, o que da covariancia de cada um com o mercado de 0,02 e variancia
+do mercado de 0,02. Com premio de 5% ao ano o delta sai 2,5 e o beta de cada
+ativo sai 1.
 
 Nao ha teste de "o resultado parece razoavel" aqui de proposito. Um modelo de
-retorno esperado produz numeros plausiveis mesmo quando esta invertido -- foi
-isso que motivou a faixa aceitavel do delta -- entao todo teste confere uma
-identidade que so vale se a conta estiver certa.
+retorno esperado produz numeros plausiveis mesmo quando esta errado -- a versao
+anterior devolvia 25% a 64% ao ano para acoes brasileiras com cara de normal --
+entao todo teste confere uma identidade que so vale se a conta estiver certa. A
+checagem de plausibilidade com dado de mercado fica nos testes da rota.
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 import pytest
@@ -23,116 +27,89 @@ COV_DIAGONAL = np.array([[0.04, 0.0], [0.0, 0.04]])
 # Com correlacao: e onde se ve uma opiniao contaminar o vizinho.
 COV_CORRELACIONADA = np.array([[0.04, 0.02], [0.02, 0.04]])
 
+# Mercado = 50/50 dos dois ativos de COV_DIAGONAL: cov com o mercado = Sigma w.
+COV_COM_MERCADO = np.array([0.02, 0.02])
+VARIANCIA_MERCADO = 0.02
+
 TAXA_LIVRE = 0.10
-
-
-class TestPesosDeMercado:
-    def test_peso_e_proporcional_ao_valor_de_mercado(self) -> None:
-        pesos, faltantes = bl.pesos_de_mercado([300e9, 100e9])
-
-        assert pesos == pytest.approx([0.75, 0.25])
-        assert faltantes == []
-        assert pesos.sum() == pytest.approx(1.0)
-
-    def test_falta_um_valor_e_o_vetor_INTEIRO_vira_peso_igual(self) -> None:
-        """Nao e "peso igual so no faltante" -- e no vetor todo.
-
-        Completar so o buraco produziria um vetor que parece o mercado e nao e,
-        porque o peso e fracao do total: o valor inventado para um ativo muda o
-        peso de todos os outros. O teste fixa a escolha de nao fazer isso.
-        """
-        pesos, faltantes = bl.pesos_de_mercado([300e9, None, 100e9])
-
-        assert pesos == pytest.approx([1 / 3, 1 / 3, 1 / 3])
-        assert faltantes == [1]
-
-    def test_valor_zero_ou_negativo_conta_como_ausencia(self) -> None:
-        """Zero nao e "empresa pequena", e dado sujo.
-
-        Tratado como numero, daria peso 0 com cara de legitimo e o ativo sumiria
-        do equilibrio sem ninguem ser avisado.
-        """
-        _, faltantes = bl.pesos_de_mercado([300e9, 0.0, -5.0])
-
-        assert faltantes == [1, 2]
-
-    def test_lista_vazia_nao_estoura(self) -> None:
-        pesos, faltantes = bl.pesos_de_mercado([])
-
-        assert pesos.shape == (0,)
-        assert faltantes == []
 
 
 class TestAversaoAoRisco:
     def test_delta_e_o_premio_dividido_pela_variancia(self) -> None:
-        """(0,15 - 0,10) / 0,02 = 2,5."""
-        delta, padrao = bl.aversao_ao_risco(0.15, 0.02, TAXA_LIVRE)
+        assert bl.aversao_ao_risco(0.05, 0.02) == pytest.approx(2.5)
 
-        assert delta == pytest.approx(2.5)
-        assert padrao is False
+    def test_com_a_volatilidade_do_ibovespa_o_delta_fica_perto_de_um(self) -> None:
+        """A calibracao que motivou a troca, em numero.
 
-    def test_mercado_que_caiu_nao_inverte_o_equilibrio(self) -> None:
-        """O caso perigoso, e a razao da faixa aceitavel existir.
-
-        Numa janela de queda o premio fica negativo e delta tambem. Com delta
-        negativo, pi = delta*Sigma*w troca de sinal e o equilibrio passa a
-        afirmar que o ativo mais arriscado rende MENOS -- a otimizacao entao
-        corre para ele. Sai sem erro, com numeros de aparencia normal.
+        Com o Ibovespa a ~22,6% de vol ao ano (mar/2025-out/2026) e premio de
+        5%, delta ~1,0. O 2,5 da literatura, calibrado na bolsa americana,
+        implicaria aqui um premio de 12,8% ao ano sobre o CDI.
         """
-        delta, padrao = bl.aversao_ao_risco(-0.20, 0.02, TAXA_LIVRE)
+        delta = bl.aversao_ao_risco(bl.PREMIO_DE_RISCO_PADRAO, 0.226**2)
 
-        assert delta == bl.DELTA_PADRAO
-        assert delta > 0
-        assert padrao is True
+        assert delta == pytest.approx(0.98, abs=0.01)
+        assert 2.5 * 0.226**2 == pytest.approx(0.128, abs=0.001)
 
-    def test_variancia_zero_cai_no_padrao_em_vez_de_dividir_por_zero(self) -> None:
-        delta, padrao = bl.aversao_ao_risco(0.15, 0.0, TAXA_LIVRE)
+    @pytest.mark.parametrize("variancia", [0.0, -0.01, math.nan, math.inf])
+    def test_variancia_impossivel_e_recusada(self, variancia: float) -> None:
+        """A versao antiga caia num delta padrao e seguia com cara de normal.
+        Variancia assim so sai de dado quebrado, e quem chama precisa saber."""
+        with pytest.raises(ValueError, match="variancia"):
+            bl.aversao_ao_risco(0.05, variancia)
 
-        assert delta == bl.DELTA_PADRAO
-        assert padrao is True
-
-    def test_delta_absurdamente_alto_cai_no_padrao(self) -> None:
-        """Premio de 50% sobre variancia minuscula da delta ~500.
-
-        Um investidor com essa aversao so aceitaria o ativo de menor variancia
-        da amostra. E sintoma de janela ruim, nao de preferencia.
-        """
-        delta, padrao = bl.aversao_ao_risco(0.60, 0.001, TAXA_LIVRE)
-
-        assert delta == bl.DELTA_PADRAO
-        assert padrao is True
+    @pytest.mark.parametrize("premio", [0.0, -0.02, math.nan])
+    def test_premio_que_nao_paga_risco_e_recusado(self, premio: float) -> None:
+        """Premio zero zera todo excedente; negativo diria que risco paga para
+        perder. Os dois inverteriam ou anulariam o equilibrio sem erro."""
+        with pytest.raises(ValueError, match="premio"):
+            bl.aversao_ao_risco(premio, 0.02)
 
 
-class TestRetornosDeEquilibrio:
-    def test_pi_conferido_na_mao(self) -> None:
-        """pi = 2,5 * diag(0,04) @ [0,5, 0,5] = [0,05, 0,05]."""
-        pi = bl.retornos_de_equilibrio(2.5, COV_DIAGONAL, np.array([0.5, 0.5]))
+class TestEquilibrio:
+    def test_pi_e_beta_vezes_premio(self) -> None:
+        """beta = [0,02; 0,03] / 0,02 = [1; 1,5]; pi = beta x 5% = [5%; 7,5%]."""
+        eq = bl.equilibrio_de_mercado(np.array([0.02, 0.03]), 0.02, premio_de_risco=0.05)
 
-        assert pi == pytest.approx([0.05, 0.05])
+        assert eq.delta == pytest.approx(2.5)
+        assert eq.betas == pytest.approx([1.0, 1.5])
+        assert eq.pi == pytest.approx([0.05, 0.075])
+        assert eq.pi == pytest.approx(eq.betas * eq.premio_de_risco)
 
-    def test_a_identidade_que_prova_a_otimizacao_reversa(self) -> None:
-        """w' pi tem que ser exatamente o premio de risco do mercado.
+    def test_e_a_mesma_otimizacao_reversa_da_formula_classica(self) -> None:
+        """Quando o mercado E uma carteira w dos ativos, pi = delta*Sigma*w.
 
-        E a identidade que sustenta o modelo inteiro: se pi = delta*Sigma*w,
-        entao w'pi = delta*w'Sigma*w = delta * variancia = premio. Um erro de
-        sinal, de transposicao ou de escala em qualquer ponto quebra isto, e
-        praticamente nada mais quebraria de forma visivel.
+        E a prova de que medir a covariancia contra o indice nao mudou o
+        modelo, so a fonte do mercado: com c = Sigma w e var = w'Sigma w, sai
+        o mesmo pi da formulacao com pesos -- e w'pi fecha no premio.
         """
         pesos = np.array([0.75, 0.25])
+        c = COV_CORRELACIONADA @ pesos
         variancia = float(pesos @ COV_CORRELACIONADA @ pesos)
-        delta, _ = bl.aversao_ao_risco(0.18, variancia, TAXA_LIVRE)
 
-        pi = bl.retornos_de_equilibrio(delta, COV_CORRELACIONADA, pesos)
+        eq = bl.equilibrio_de_mercado(c, variancia, premio_de_risco=0.06)
 
-        assert float(pesos @ pi) == pytest.approx(0.18 - TAXA_LIVRE)
+        assert eq.pi == pytest.approx(eq.delta * COV_CORRELACIONADA @ pesos)
+        assert float(pesos @ eq.pi) == pytest.approx(0.06)
 
-    def test_quem_carrega_mais_risco_promete_mais(self) -> None:
-        """Sem retorno historico nenhum na conta -- so covariancia e pesos."""
-        cov = np.array([[0.01, 0.0], [0.0, 0.09]])
+    def test_o_retorno_de_um_ativo_nao_depende_dos_vizinhos(self) -> None:
+        """A regressao principal: o mercado era a carteira do usuario.
 
-        pi = bl.retornos_de_equilibrio(2.5, cov, np.array([0.5, 0.5]))
+        Antes, o pi de ITUB4 ia de 16% a 52% ao ano conforme os outros papeis
+        da carteira. Agora cada pi depende so da covariancia do ativo com o
+        indice -- acrescentar ou tirar vizinho nao o move.
+        """
+        sozinho = bl.equilibrio_de_mercado(np.array([0.03, 0.01]), 0.02)
+        com_outros = bl.equilibrio_de_mercado(np.array([0.03, 0.05, 0.02, 0.04]), 0.02)
 
-        assert pi[1] > pi[0]
+        assert sozinho.pi[0] == com_outros.pi[0]
+
+    def test_ativo_que_anda_contra_o_mercado_promete_menos_que_a_taxa_livre(self) -> None:
+        """Beta negativo (ouro, dolar em crise) da excedente negativo: o ativo
+        paga para proteger. E o comportamento correto, nao um erro de sinal."""
+        eq = bl.equilibrio_de_mercado(np.array([-0.004]), 0.02)
+
+        assert eq.betas[0] == pytest.approx(-0.2)
+        assert eq.pi[0] == pytest.approx(-0.01)
 
 
 class TestParaExcesso:
@@ -258,20 +235,31 @@ class TestCombinar:
 
 
 class TestCaminhoCompleto:
-    def test_do_valor_de_mercado_ate_o_mu(self) -> None:
-        """Tudo conferido na mao: w=[0,5;0,5], var=0,02, delta=2,5, pi=[0,05;0,05]."""
+    def test_da_covariancia_com_o_mercado_ate_o_mu(self) -> None:
+        """Tudo conferido na mao: delta=2,5, beta=[1;1], pi=[0,05;0,05]."""
         posterior = bl.black_litterman(
-            COV_DIAGONAL,
-            [100e9, 100e9],
-            retorno_mercado=0.15,
-            taxa_livre_risco=TAXA_LIVRE,
+            COV_DIAGONAL, COV_COM_MERCADO, VARIANCIA_MERCADO, taxa_livre_risco=TAXA_LIVRE
         )
 
-        assert posterior.equilibrio.pesos_mercado == pytest.approx([0.5, 0.5])
         assert posterior.equilibrio.delta == pytest.approx(2.5)
+        assert posterior.equilibrio.betas == pytest.approx([1.0, 1.0])
         assert posterior.equilibrio.pi == pytest.approx([0.05, 0.05])
         assert posterior.mu == pytest.approx([0.05, 0.05])
         assert posterior.visoes_aplicadas == 0
+
+    def test_o_premio_padrao_e_cinco_por_cento(self) -> None:
+        assert bl.PREMIO_DE_RISCO_PADRAO == 0.05
+
+    def test_premio_maior_escala_o_equilibrio_na_mesma_proporcao(self) -> None:
+        posterior = bl.black_litterman(
+            COV_DIAGONAL,
+            COV_COM_MERCADO,
+            VARIANCIA_MERCADO,
+            taxa_livre_risco=TAXA_LIVRE,
+            premio_de_risco=0.08,
+        )
+
+        assert posterior.equilibrio.pi == pytest.approx([0.08, 0.08])
 
     def test_a_opiniao_chega_em_retorno_TOTAL_e_e_convertida(self) -> None:
         """O erro de unidade que nao estoura em lugar nenhum.
@@ -285,8 +273,8 @@ class TestCaminhoCompleto:
 
         posterior = bl.black_litterman(
             COV_DIAGONAL,
-            [100e9, 100e9],
-            retorno_mercado=0.15,
+            COV_COM_MERCADO,
+            VARIANCIA_MERCADO,
             taxa_livre_risco=TAXA_LIVRE,
             p=p,
             q_total=np.array([0.15]),
@@ -299,14 +287,3 @@ class TestCaminhoCompleto:
         excedente = np.array([0.05, 0.03])
 
         assert bl.retorno_total(excedente, TAXA_LIVRE) == pytest.approx([0.15, 0.13])
-
-    def test_sem_valor_de_mercado_o_prior_avisa_que_nao_e_o_mercado(self) -> None:
-        posterior = bl.black_litterman(
-            COV_DIAGONAL,
-            [100e9, None],
-            retorno_mercado=0.15,
-            taxa_livre_risco=TAXA_LIVRE,
-        )
-
-        assert posterior.equilibrio.usou_peso_igual is True
-        assert posterior.equilibrio.sem_valor_de_mercado == [1]

@@ -275,6 +275,75 @@ def matriz_covariancia(
     return tickers, cov
 
 
+# Fracao minima dos pregoes da janela que precisa ter a variacao do indice.
+#
+# Todo dia em que os ativos negociaram, a B3 tambem calculou o Ibovespa; se o
+# indice falta em mais de 5% deles, o problema e a serie (fornecedor fora do ar,
+# cache incompleto), e um beta medido sobre esse buraco nao descreve a janela
+# que o resto do calculo usa.
+COBERTURA_MINIMA_INDICE = 0.95
+
+
+def alinhar_com_indice(
+    series: SeriesAlinhadas,
+    variacoes: Mapping[date_type, float],
+    *,
+    cobertura_minima: float = COBERTURA_MINIMA_INDICE,
+) -> tuple[SeriesAlinhadas, np.ndarray] | None:
+    """Recorta as series aos dias que tambem tem indice, e devolve o NIVEL dele.
+
+    O indice chega como variacao diaria (como o CDI), nao como preco. Para
+    compara-lo com os ativos ele vira um nivel acumulado -- o preco de uma cota
+    que rende exatamente o indice -- e o retorno sai do mesmo jeito que o de um
+    ativo, entre as MESMAS duas datas. Se um ativo nao negociou num dia em que o
+    indice andou, o retorno do indice entre as duas datas restantes ja inclui
+    aquele dia, porque o nivel acumula tudo.
+
+    Devolve None quando a cobertura e insuficiente: melhor dizer "faltou o
+    Ibovespa" do que medir beta sobre metade da janela.
+    """
+    datas_do_indice = sorted(d for d in variacoes if series.inicio <= d <= series.fim)
+    nivel: dict[date_type, float] = {}
+    acumulado = 1.0
+    for dia in datas_do_indice:
+        acumulado *= 1.0 + float(variacoes[dia])
+        nivel[dia] = acumulado
+
+    manter = [i for i, dia in enumerate(series.datas) if dia in nivel]
+    if len(manter) < 2 or len(manter) < cobertura_minima * len(series.datas):
+        return None
+
+    indices = np.array(manter)
+    datas = tuple(series.datas[i] for i in manter)
+    recortadas = SeriesAlinhadas(
+        datas=datas, precos={t: series.precos[t][indices] for t in series.tickers}
+    )
+    return recortadas, np.array([nivel[d] for d in datas], dtype=np.float64)
+
+
+def covariancia_com_indice(
+    series: SeriesAlinhadas, nivel_do_indice: np.ndarray, anualizar: bool = True
+) -> tuple[list[str], np.ndarray, np.ndarray, float]:
+    """(tickers, Sigma dos ativos, cov de cada ativo com o indice, var do indice).
+
+    As tres saem de UMA matriz de covariancia conjunta, sobre os mesmos dias.
+    Calcular cada pedaco numa amostra diferente daria um beta de um periodo
+    aplicado ao risco de outro -- os numeros fecham e o equilibrio sai torto.
+    """
+    if len(nivel_do_indice) != len(series):
+        raise ValueError(
+            f"indice com {len(nivel_do_indice)} pontos para {len(series)} datas -- desalinhado"
+        )
+    tickers, retornos = matriz_de_retornos(series)
+    conjunta = np.cov(
+        np.column_stack([retornos, retornos_diarios(nivel_do_indice)]), rowvar=False, ddof=1
+    )
+    if anualizar:
+        conjunta = conjunta * PREGOES_POR_ANO
+    n = len(tickers)
+    return tickers, conjunta[:n, :n], conjunta[:n, n], float(conjunta[n, n])
+
+
 def para_float(valores: list[Decimal]) -> np.ndarray:
     """Fronteira explicita entre o mundo Decimal e o mundo estatistico.
 

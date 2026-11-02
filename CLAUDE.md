@@ -76,12 +76,26 @@ covariância, e média histórica por ativo tem erro-padrão enorme — a cartei
   as contas fecham e o Sharpe sai negativo na carteira de máximo Sharpe.
 - **A frente usa a covariância POSTERIOR**, não a amostral. Ela depende das
   opiniões, então opinar muda até a carteira de mínima variância.
-- **`delta` fora da faixa 0,5–10 cai para 2,5.** Numa janela de queda o delta
-  amostral fica negativo, `pi` inverte de sinal e o equilíbrio passa a dizer
-  que ativo arriscado rende menos.
-- **Sem `market_cap` no catálogo, o prior deixa de ser o mercado** e vira peso
-  igual — `equilibrio.usou_peso_igual` avisa. O `criar_ativo` dos testes nasce
-  sem valor de mercado de propósito.
+- **O mercado é o Ibovespa, não a carteira.** `pi_i = beta_i × prêmio`, com
+  beta medido contra o Ibovespa na MESMA amostra da covariância
+  (`alinhar_com_indice` + `covariancia_com_indice`). A versão antiga usava os
+  ativos da carteira pesados por `market_cap` e o delta do retorno passado
+  deles: o `pi` de um papel mudava com os vizinhos (ITUB4 de 16% a 52%), PETR3
+  + PETR4 contavam a Petrobras duas vezes e um ano bom dava delta 8,9 (ações a
+  25–64% a.a.). `market_cap` não entra mais na otimização.
+- **O prêmio de risco é premissa, não média histórica**: 5% a.a. sobre o CDI
+  por padrão (`PREMIO_DE_RISCO_PADRAO`), editável no pedido e na tela
+  (`premio_de_risco`, 0 < p ≤ 15%). Com o Ibovespa a ~22% de vol, delta ≈ 1.
+  O 2,5 da literatura é calibrado nos EUA e aqui implicaria prêmio de ~12,8%.
+- **A taxa livre de risco é o CDI do BCB** (`benchmark_service.taxa_livre_risco`),
+  mais recente da tabela `benchmark_rates`; `RISK_FREE_RATE` do `.env` é só
+  reserva, e a resposta diz a origem (`fonte_taxa_livre_risco`). Vale para as
+  três rotas de `routers/metrics.py`.
+- **Sem Ibovespa na janela (cobertura < 95%), a otimização responde vazia com
+  motivo** — nada de cair para um prior inventado. Os testes usam `BcbFake` e
+  `IbovFake` do `conftest.py`; as séries de `test_optimization_api.py` são
+  `beta × variacao_do_ibov(dia) + ruído`, e o teste de identidade grava um
+  Ibovespa que é carteira 50/30/20 dos ativos (máximo Sharpe tem que dar 50/30/20).
 - Opinião que cita ativo fora do cálculo é **descartada com motivo**, nunca
   aplicada pela metade: zerar o coeficiente ausente transforma "PETR4 supera
   VALE3 em 3 pontos" em "PETR4 rende 3%".

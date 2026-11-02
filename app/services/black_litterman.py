@@ -3,26 +3,48 @@
 ## O problema que este modulo resolve
 
 A fronteira eficiente de Markowitz e sensivel ao `mu` que recebe. Usar a media
-historica como estimativa do retorno esperado -- o que `optimizer_service` fazia
--- tem uma falha conhecida e grave: pequenas mudancas na janela produzem
-carteiras completamente diferentes, e o otimizador concentra tudo no papel que
-por acaso mais subiu na amostra. A media historica de um ativo e uma estimativa
-com erro-padrao enorme; a covariancia, nao. Como o otimizador amplifica erro no
-retorno muito mais que erro na covariancia, o resultado e uma carteira que
-parece otima e e, na pratica, ruido.
+historica como estimativa do retorno esperado tem uma falha conhecida e grave:
+pequenas mudancas na janela produzem carteiras completamente diferentes, e o
+otimizador concentra tudo no papel que por acaso mais subiu na amostra. A media
+historica de um ativo e uma estimativa com erro-padrao enorme; a covariancia,
+nao. Como o otimizador amplifica erro no retorno muito mais que erro na
+covariancia, o resultado e uma carteira que parece otima e e, na pratica, ruido.
 
 Black-Litterman ataca exatamente isso. Em vez de perguntar "quanto este ativo
 rendeu?", ele pergunta "que retorno o mercado PRECISA estar esperando para que
 os precos de hoje facam sentido?". Esse e o retorno de equilibrio, e ele nasce
-de uma otimizacao reversa: se a carteira de mercado e otima, entao
+de uma otimizacao reversa: se a carteira de mercado M e otima, entao cada ativo
+promete um excedente proporcional ao risco que ele soma a M:
 
-    pi = delta * Sigma * w_mercado
+    pi_i = delta * cov(r_i, r_M)          delta = premio / var(r_M)
+         = beta_i * premio                beta_i = cov(r_i, r_M) / var(r_M)
 
 Sobre esse ponto de partida o investidor sobrepoe opinioes ("acho que PETR4
 rende 15% ao ano", "acho que bancos superam mineracao em 3 pontos"), e o modelo
 combina as duas fontes ponderando pela incerteza de cada uma. Sem opiniao
-nenhuma, o resultado E o equilibrio -- uma carteira parecida com o mercado, que
-e um default muito mais defensavel que "tudo no que mais subiu".
+nenhuma, o resultado E o equilibrio.
+
+## O mercado e o Ibovespa, nao a carteira do usuario
+
+A primeira versao deste modulo usava como "mercado" os proprios ativos da
+carteira, pesados pelo valor de mercado, e estimava `delta` pelo retorno
+passado desse conjunto. As duas escolhas estavam erradas, e o erro era grande:
+
+  - **O retorno de um ativo dependia dos vizinhos.** Com o mercado igual a
+    carteira, `pi` de ITUB4 saia 16% ao lado de WEGE3 e 52% ao lado de VALE3 e
+    PETR4 (precos reais, 2025-2026). O equilibrio e do mercado inteiro; o que a
+    pessoa tem na carteira nao muda o que o mercado espera de um papel.
+  - **A media historica voltava pela porta dos fundos.** Um ano em que a
+    carteira subiu 43% dava delta 8,9 e um premio de 33% ao ano acima do CDI --
+    retorno esperado de 25% a 64% para acoes brasileiras. Exatamente o ruido que
+    o modelo existe para tirar.
+  - **Classes da mesma empresa contavam duas vezes.** O valor de mercado do
+    Yahoo e o da empresa inteira em cada classe; PETR3 + PETR4 viravam 70% do
+    "mercado".
+
+Agora o mercado e o Ibovespa, medido na MESMA janela da covariancia, e o premio
+de risco e uma PREMISSA declarada (5% ao ano sobre o CDI por padrao), nao uma
+media do passado. O valor de mercado deixou de ser necessario.
 
 ## Qual variante
 
@@ -46,7 +68,7 @@ conversao acontece numa fronteira explicita, como a de Decimal para float.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -65,42 +87,30 @@ Matriz = np.ndarray[Any, np.dtype[np.float64]]
 # peso relativo entre equilibrio e opiniao.
 TAU_PADRAO = 0.025
 
-# Aversao ao risco quando nao da para estimar do mercado.
+# Quanto a bolsa rende acima do CDI, por ano, no longo prazo. E PREMISSA, nao
+# medida -- e por isso fica declarada e editavel em vez de sair do historico.
 #
-# 2,5 e o valor que He & Litterman usaram para o mercado global e virou o
-# default de facto. Serve de rede: a estimativa amostral vira lixo numa janela
-# em que o mercado caiu (delta sairia negativo, e o equilibrio mandaria vender
-# tudo -- resposta absurda que o modelo daria com cara de seria).
-DELTA_PADRAO = 2.5
-
-# Faixa aceitavel para o delta estimado. Fora dela, cai para o padrao.
-#
-# Abaixo de 0,5 o investidor seria quase indiferente ao risco e o equilibrio
-# viraria uma aposta alavancada; acima de 10 ele seria tao avesso que so o ativo
-# de menor variancia sobreviveria. Os dois extremos sao sintoma de amostra ruim,
-# nao de preferencia real.
-DELTA_MINIMO = 0.5
-DELTA_MAXIMO = 10.0
+# 5% fica no meio do que se usa para o Brasil (4% a 6% sobre o CDI). Com a
+# volatilidade do Ibovespa perto de 22% ao ano, da delta ~1,0. O 2,5 da
+# literatura foi calibrado para a bolsa americana (vol ~15%); aplicado aqui,
+# implicaria um premio de ~12,5% ao ano, alto demais.
+PREMIO_DE_RISCO_PADRAO = 0.05
 
 
 @dataclass(frozen=True)
 class Equilibrio:
-    """O prior: o que o mercado esta implicitamente esperando.
+    """O prior: o que o mercado esta implicitamente esperando de cada ativo."""
 
-    `usou_peso_igual` e `usou_delta_padrao` existem para a interface poder
-    dizer ao usuario em que terreno ele esta pisando. Um resultado calculado
-    sobre peso igual porque faltou valor de mercado nao e errado, mas tambem
-    nao e "o equilibrio do mercado" -- e chamar os dois pela mesma coisa
-    enganaria quem le o grafico.
-    """
-
-    pesos_mercado: Vetor
+    premio_de_risco: float
+    """Premio anual da carteira de mercado sobre a taxa livre de risco."""
+    variancia_mercado: float
+    """Variancia anualizada do indice de mercado, na janela da covariancia."""
     delta: float
+    """Aversao ao risco implicita: premio / variancia do mercado."""
+    betas: Vetor
+    """cov(r_i, r_M) / var(r_M): quanto cada ativo acompanha o mercado."""
     pi: Vetor
-    usou_peso_igual: bool
-    usou_delta_padrao: bool
-    sem_valor_de_mercado: list[int]
-    """Indices dos ativos sem valor de mercado, na ordem recebida."""
+    """Retorno EXCEDENTE de equilibrio (beta * premio), anualizado."""
 
 
 @dataclass(frozen=True)
@@ -114,102 +124,62 @@ class Posterior:
     visoes_aplicadas: int
 
 
-def pesos_de_mercado(valores: Sequence[float | None]) -> tuple[Vetor, list[int]]:
-    """Peso de cada ativo na carteira de mercado, pelo valor de mercado.
-
-    Devolve tambem os indices sem valor. Quando FALTA QUALQUER UM, a funcao cai
-    para peso igual no vetor INTEIRO, e nao so no ativo faltante.
-
-    Isso e deliberado e vale explicar. A alternativa tentadora -- dar ao ativo
-    sem dado algum valor plausivel, ou distribuir o residual -- produz um vetor
-    que parece o mercado mas nao e, e o erro se propaga silenciosamente para o
-    `pi` de TODOS os ativos, porque o peso e uma fracao do total. Peso igual e
-    obviamente uma aproximacao; um mercado meio real e meio inventado nao e
-    obviamente nada, e e por isso que e pior.
-    """
-    faltantes: list[int] = []
-    capitalizacoes: list[float] = []
-    for i, valor in enumerate(valores):
-        # Zero e negativo entram como ausencia, e nao como numero pequeno: um
-        # valor de mercado nulo nao existe no mundo real, entao e dado sujo --
-        # e dado sujo dividido pelo total daria peso 0 com cara de legitimo.
-        if valor is None or valor <= 0:
-            faltantes.append(i)
-            capitalizacoes.append(0.0)
-        else:
-            capitalizacoes.append(float(valor))
-
-    n = len(capitalizacoes)
-    if n == 0:
-        return np.zeros(0, dtype=np.float64), faltantes
-    if faltantes:
-        return np.full(n, 1.0 / n, dtype=np.float64), faltantes
-
-    total = np.array(capitalizacoes, dtype=np.float64)
-    return np.asarray(total / total.sum(), dtype=np.float64), faltantes
-
-
-def aversao_ao_risco(
-    retorno_mercado: float, variancia_mercado: float, taxa_livre_risco: float
-) -> tuple[float, bool]:
-    """delta = (E[Rm] - rf) / var(Rm). Devolve (delta, caiu_no_padrao).
+def aversao_ao_risco(premio_de_risco: float, variancia_mercado: float) -> float:
+    """delta = premio / var(r_M).
 
     E a otimizacao reversa aplicada a carteira de mercado inteira: se ela e
     otima para um investidor de aversao `delta`, entao esse delta e o preco do
     risco que o mercado esta cobrando.
 
-    A estimativa amostral falha de um jeito especifico e perigoso: numa janela
-    em que o mercado caiu, o numerador fica negativo e delta tambem. Com delta
-    negativo, `pi = delta * Sigma * w` inverte de sinal e o equilibrio passa a
-    dizer que os ativos mais arriscados sao os que rendem MENOS -- a otimizacao
-    entao empurra a carteira para eles. O resultado sai sem erro, com numeros
-    de aparencia normal, e esta invertido. Dai a faixa aceitavel: fora dela, o
-    problema e a amostra, e o padrao da literatura e menos errado.
+    Recusa entrada impossivel em vez de inventar um numero. Variancia zero (ou
+    negativa, ou NaN) so aparece com dado quebrado, e premio nao positivo faria
+    o equilibrio dizer que risco nao paga nada -- ou que paga para perder. A
+    versao antiga caia num delta padrao nesses casos e seguia com cara de
+    normal; aqui quem chama decide o que dizer ao usuario.
     """
-    if variancia_mercado <= 0.0:
-        return DELTA_PADRAO, True
-    delta = (retorno_mercado - taxa_livre_risco) / variancia_mercado
-    if not np.isfinite(delta) or delta < DELTA_MINIMO or delta > DELTA_MAXIMO:
-        return DELTA_PADRAO, True
-    return float(delta), False
+    if not math.isfinite(variancia_mercado) or variancia_mercado <= 0.0:
+        raise ValueError(f"variancia do mercado invalida: {variancia_mercado}")
+    if not math.isfinite(premio_de_risco) or premio_de_risco <= 0.0:
+        raise ValueError(f"premio de risco precisa ser positivo: {premio_de_risco}")
+    return premio_de_risco / variancia_mercado
 
 
-def retornos_de_equilibrio(delta: float, cov: Matriz, pesos_mercado: Vetor) -> Vetor:
-    """pi = delta * Sigma * w -- a otimizacao reversa.
+def retornos_de_equilibrio(delta: float, cov_com_mercado: Vetor) -> Vetor:
+    """pi = delta * cov(r_i, r_M) -- a otimizacao reversa, linha a linha.
 
-    Le-se: o retorno excedente que cada ativo precisa estar prometendo para que
-    ninguem queira mudar a carteira de mercado. Ativo que contribui muito para o
-    risco do conjunto (linha de Sigma grande contra os pesos) precisa prometer
-    mais. Repare que nao ha nenhum retorno historico nesta conta -- so
-    covariancia e pesos, que sao as duas coisas que se estima bem.
+    E o mesmo `delta * Sigma * w_mercado` da formulacao classica, escrito sem
+    precisar da matriz do mercado inteiro: `Sigma * w_mercado` E a covariancia
+    de cada ativo com a carteira de mercado. Medindo essa covariancia direto
+    contra o indice, o `pi` de um ativo passa a depender so dele e do mercado
+    -- nao do que mais estiver na carteira.
+
+    Repare que nao ha nenhum retorno historico nesta conta: so covariancia, que
+    e o que se estima bem, e o premio, que e premissa declarada.
     """
-    return np.asarray(delta * cov @ pesos_mercado, dtype=np.float64)
+    return np.asarray(delta * np.asarray(cov_com_mercado, dtype=np.float64), dtype=np.float64)
 
 
 def equilibrio_de_mercado(
-    cov: Matriz,
-    valores_de_mercado: Sequence[float | None],
+    cov_com_mercado: Vetor,
+    variancia_mercado: float,
     *,
-    retorno_mercado: float,
-    taxa_livre_risco: float,
+    premio_de_risco: float = PREMIO_DE_RISCO_PADRAO,
 ) -> Equilibrio:
-    """Monta o prior inteiro: pesos, delta e pi.
+    """Monta o prior inteiro: delta, betas e pi.
 
-    `retorno_mercado` e o retorno anualizado da carteira de mercado na mesma
-    janela de `cov`. A variancia dela sai da propria `cov` (w' Sigma w), e nao
-    de uma segunda estimativa -- usar duas fontes para o mesmo numero e como
-    ficam as inconsistencias que ninguem consegue rastrear depois.
+    `cov_com_mercado[i]` e a covariancia anualizada do ativo i com o indice de
+    mercado e `variancia_mercado` a do indice, as duas na MESMA janela e na
+    mesma unidade da covariancia entre os ativos. Misturar janelas aqui daria
+    betas de um periodo aplicados a riscos de outro.
     """
-    pesos, faltantes = pesos_de_mercado(valores_de_mercado)
-    variancia = float(pesos @ cov @ pesos) if pesos.size else 0.0
-    delta, padrao = aversao_ao_risco(retorno_mercado, variancia, taxa_livre_risco)
+    delta = aversao_ao_risco(premio_de_risco, variancia_mercado)
+    c = np.asarray(cov_com_mercado, dtype=np.float64)
     return Equilibrio(
-        pesos_mercado=pesos,
+        premio_de_risco=premio_de_risco,
+        variancia_mercado=variancia_mercado,
         delta=delta,
-        pi=retornos_de_equilibrio(delta, cov, pesos),
-        usou_peso_igual=bool(faltantes),
-        usou_delta_padrao=padrao,
-        sem_valor_de_mercado=faltantes,
+        betas=np.asarray(c / variancia_mercado, dtype=np.float64),
+        pi=retornos_de_equilibrio(delta, c),
     )
 
 
@@ -315,10 +285,11 @@ def retorno_total(mu_excesso: Vetor, taxa_livre_risco: float) -> Vetor:
 
 def black_litterman(
     cov: Matriz,
-    valores_de_mercado: Sequence[float | None],
+    cov_com_mercado: Vetor,
+    variancia_mercado: float,
     *,
-    retorno_mercado: float,
     taxa_livre_risco: float,
+    premio_de_risco: float = PREMIO_DE_RISCO_PADRAO,
     p: Matriz | None = None,
     q_total: Vetor | None = None,
     tau: float = TAU_PADRAO,
@@ -330,10 +301,7 @@ def black_litterman(
     dentro, uma vez so.
     """
     equilibrio = equilibrio_de_mercado(
-        cov,
-        valores_de_mercado,
-        retorno_mercado=retorno_mercado,
-        taxa_livre_risco=taxa_livre_risco,
+        cov_com_mercado, variancia_mercado, premio_de_risco=premio_de_risco
     )
 
     n = cov.shape[0]

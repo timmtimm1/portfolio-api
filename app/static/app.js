@@ -2012,29 +2012,28 @@ function desenharMatriz(correlacao) {
 $("#btn-otimizar").addEventListener("click", otimizar);
 
 // Explica de onde saiu o equilíbrio DESTA fronteira -- não o texto genérico
-// do método (isso é `r.aviso`), e sim o que aconteceu NESTE cálculo: partiu
-// do mercado de verdade ou caiu para peso igual, e qual aversão ao risco foi
-// usada. Existe porque Black-Litterman é uma caixa-preta se a tela só
-// mostrar a curva (ver `EquilibrioResumo` no backend).
-// Uma casa decimal fixa, em pt-BR ("2,5", nunca "2.5"). `num()` existe pra
-// isto, mas com ate 8 casas soltas -- aqui o delta quase nunca cai redondo, e
-// "2,486731" reportaria falsa precisao numa referencia que e "~2,5" na
-// literatura.
-const numDelta = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// do método (isso é `r.aviso`), e sim a conta deste cálculo. O retorno de
+// equilíbrio cabe numa frase: taxa livre de risco + beta x prêmio. Mostrar a
+// conta com os números de cada ativo é o que explica por que um papel
+// "promete" mais que outro antes de qualquer opinião (ver `EquilibrioResumo`
+// no backend).
+// Beta com duas casas fixas, em pt-BR ("1,05", nunca "1.05"). `num()` existe
+// pra isto, mas com até 8 casas soltas -- "1,048731" reportaria falsa precisão
+// num número que muda de uma janela para outra.
+const numBeta = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function explicacaoDoEquilibrio(equilibrio) {
+function explicacaoDoEquilibrio(equilibrio, taxa, fonteDaTaxa) {
   if (!equilibrio) return "";
-  const partes = [
-    equilibrio.usou_peso_igual
-      ? `Sem valor de mercado para ${equilibrio.sem_valor_de_mercado.join(", ")}, o ponto ` +
-        "de partida usou peso igual entre os ativos em vez dos pesos de mercado."
-      : "O ponto de partida usa os pesos de mercado reais dos ativos.",
-    equilibrio.usou_delta_padrao
-      ? "A aversão ao risco saiu da faixa usual nesta janela e foi travada em " +
-        `${numDelta(equilibrio.aversao_ao_risco)}, a referência da literatura.`
-      : `Aversão ao risco calculada nesta janela: ${numDelta(equilibrio.aversao_ao_risco)}.`,
-  ];
-  return partes.join(" ");
+  const ativos = Object.keys(equilibrio.betas)
+    .sort()
+    .map((t) => `${t} (beta ${numBeta(equilibrio.betas[t])}) ${proporcao(equilibrio.retorno_de_equilibrio[t])}`);
+  return [
+    `Ponto de partida: cada ativo rende a taxa livre de risco (${proporcao(taxa, 2)}, ` +
+      `${fonteDaTaxa || "valor configurado"}) mais o quanto ele acompanha o ` +
+      `${equilibrio.referencia} — o beta — vezes um prêmio de ` +
+      `${proporcao(equilibrio.premio_de_risco)} ao ano.`,
+    `Nesta janela: ${ativos.join(" · ")}.`,
+  ].join(" ");
 }
 
 async function otimizar() {
@@ -2045,14 +2044,20 @@ async function otimizar() {
   try {
     const r = await api(comCarteira("/portfolio/optimize"), {
       method: "POST",
-      body: JSON.stringify({ peso_maximo: Number($("#peso-maximo").value), pontos: 40 }),
+      body: JSON.stringify({
+        peso_maximo: Number($("#peso-maximo").value),
+        premio_de_risco: Number($("#premio-risco").value),
+        pontos: 40,
+      }),
     });
     ultimaOtimizacao = r;
     desenharFronteira(r);
     renderCarteiras(r);
     // Sem `equilibrio` (fronteira vazia) não há o que explicar.
     $("#explicacao-modelo").hidden = !r.equilibrio;
-    $("#explicacao-equilibrio").textContent = explicacaoDoEquilibrio(r.equilibrio);
+    $("#explicacao-equilibrio").textContent = explicacaoDoEquilibrio(
+      r.equilibrio, r.taxa_livre_risco, r.fonte_taxa_livre_risco,
+    );
     $("#aviso-modelo").textContent = r.aviso;
     // Recalcular a fronteira invalida o plano anterior: os pesos mudaram.
     $("#reb-resultado").hidden = true;

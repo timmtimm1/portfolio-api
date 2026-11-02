@@ -26,6 +26,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date as date_type
+from datetime import timedelta
 from decimal import Decimal
 from functools import partial
 
@@ -37,6 +38,7 @@ from app.clients.bcb import BcbClient
 from app.clients.ibov import IbovClient
 from app.models.benchmark import BenchmarkRate, Indexador
 from app.models.snapshot import PortfolioSnapshot
+from app.services.metrics import PREGOES_POR_ANO
 
 # O formato que qualquer fornecedor de taxas precisa produzir: dado um
 # periodo, uma taxa diaria por data. `BcbClient.taxas` (com o indexador ja
@@ -121,6 +123,90 @@ async def taxas_do_periodo(
     await db.commit()
 
     return {**existentes, **novas}
+
+
+# A taxa livre de risco e o CDI MAIS RECENTE, lido da mesma tabela que o
+# grafico de evolucao ja preenche.
+#
+# Ate `CDI_RECENTE_DIAS` a ultima taxa gravada vale como "a de hoje" sem
+# perguntar ao BCB de novo: cobre fim de semana com feriado emendado (de sexta a
+# quarta-feira de cinzas sao 5 dias). Fora disso busca-se o ultimo mes; e, se o
+# BCB nao responder, uma taxa de ate `CDI_TOLERADO_DIAS` ainda serve -- com a
+# data a vista na tela, porque o CDI muda devagar e a data denuncia o atraso.
+CDI_RECENTE_DIAS = 7
+CDI_BUSCA_DIAS = 30
+CDI_TOLERADO_DIAS = 45
+
+
+@dataclass(frozen=True)
+class TaxaLivreRisco:
+    """A taxa anual usada no Sharpe e no Black-Litterman, e de onde ela veio.
+
+    A origem viaja junto porque o numero sozinho nao se explica: 13,65% "do
+    CDI de ontem" e 10% "do arquivo de configuracao" pedem leituras diferentes,
+    e a segunda tem que aparecer como aviso.
+    """
+
+    valor: float
+    fonte: str
+    data: date_type | None
+    """Dia do CDI usado. None quando o valor veio da configuracao."""
+
+
+def anualizar_taxa_diaria(taxa: Decimal | float) -> float:
+    """(1 + taxa do dia) ^ 252 - 1.
+
+    O CDI e publicado como taxa DIARIA e compoe por dia util, entao o ano tem
+    252 periodos -- a mesma convencao das demais metricas. Multiplicar por 252
+    em vez de elevar subestimaria a taxa em quase um ponto com o CDI a 14%.
+    """
+    return float((1.0 + float(taxa)) ** PREGOES_POR_ANO - 1.0)
+
+
+async def _ultimo_cdi(db: AsyncSession, desde: date_type) -> BenchmarkRate | None:
+    return (
+        await db.execute(
+            select(BenchmarkRate)
+            .where(BenchmarkRate.indexador == Indexador.CDI, BenchmarkRate.date >= desde)
+            .order_by(BenchmarkRate.date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def taxa_livre_risco(
+    db: AsyncSession, bcb: BcbClient, *, hoje: date_type, reserva: float
+) -> TaxaLivreRisco:
+    """CDI anualizado mais recente; `reserva` (o RISK_FREE_RATE) so se nao houver.
+
+    A versao anterior lia so o `.env`, ajustado a mao "conforme o COPOM" -- e
+    ficou em 10% com a Selic em 13,75%. Esse numero entra no Sharpe, na
+    conversao das opinioes absolutas e no retorno total de cada ativo; um ponto
+    e meio de erro nele desloca a fronteira inteira sem estourar nada.
+    """
+    linha = await _ultimo_cdi(db, hoje - timedelta(days=CDI_RECENTE_DIAS))
+    if linha is None:
+        await taxas_do_periodo(
+            db,
+            Indexador.CDI,
+            hoje - timedelta(days=CDI_BUSCA_DIAS),
+            hoje,
+            buscar=partial(bcb.taxas, Indexador.CDI),
+        )
+        linha = await _ultimo_cdi(db, hoje - timedelta(days=CDI_TOLERADO_DIAS))
+
+    if linha is None:
+        logger.warning("[taxa_livre_risco] sem CDI recente; usando a reserva configurada")
+        return TaxaLivreRisco(
+            valor=reserva,
+            fonte="valor de reserva da configuração (CDI do Banco Central indisponível)",
+            data=None,
+        )
+    return TaxaLivreRisco(
+        valor=anualizar_taxa_diaria(linha.rate),
+        fonte=f"CDI de {linha.date:%d/%m/%Y}, Banco Central",
+        data=linha.date,
+    )
 
 
 def curva_equivalente(

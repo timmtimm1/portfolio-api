@@ -33,6 +33,8 @@ os.environ["SECRET_KEY"] = "chave-de-teste-deterministica-com-mais-de-32-caracte
 os.environ.setdefault("POSTGRES_PASSWORD", "teste")
 
 from collections.abc import AsyncIterator, Iterator  # noqa: E402
+from datetime import date, timedelta  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
@@ -42,10 +44,16 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
-from app.clients import get_provedor_de_cotacoes  # noqa: E402
+from app.clients import (  # noqa: E402
+    get_bcb_client,
+    get_ibov_client,
+    get_provedor_de_cotacoes,
+)
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_db  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.models.benchmark import Indexador  # noqa: E402
+from tests.factories import variacao_do_ibov  # noqa: E402
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -130,13 +138,68 @@ class ProvedorFake:
         return {t: Cotacao(t, Decimal(self.precos[t]), "fake") for t in tickers if t in self.precos}
 
 
+# CDI diario dos dubles: (1 + 0,00050788)^252 - 1 = 13,65% ao ano, perto da
+# Selic de 13,75% de nov/2026. Numero realista de proposito: um CDI de 1% ao ano
+# deixaria passar erro de escala que com 13% aparece.
+CDI_DIARIO_FAKE = Decimal("0.00050788")
+
+
+class BcbFake:
+    """Duble do Banco Central: CDI e Selic constantes em todo dia util.
+
+    Existe pelo mesmo motivo do `ProvedorFake`: desde que a taxa livre de risco
+    passou a vir do CDI, as rotas de metricas e de otimizacao perguntam ao BCB.
+    `falha = True` simula o BCB fora do ar.
+    """
+
+    def __init__(self) -> None:
+        self.falha = False
+        self.chamadas: list[tuple[Indexador, date, date]] = []
+
+    async def taxas(self, indexador: Indexador, desde: date, ate: date) -> dict[date, Decimal]:
+        self.chamadas.append((indexador, desde, ate))
+        if self.falha or indexador is Indexador.IPCA:
+            return {}
+        dias = (desde + timedelta(days=i) for i in range((ate - desde).days + 1))
+        return {d: CDI_DIARIO_FAKE for d in dias if d.weekday() < 5}
+
+
+class IbovFake:
+    """Duble do Yahoo para o Ibovespa: a variacao de `variacao_do_ibov` em
+    TODO dia do periodo, inclusive fim de semana -- as series sinteticas dos
+    testes tambem tem preco todo dia, e o alinhamento e pela data."""
+
+    def __init__(self) -> None:
+        self.falha = False
+        self.chamadas: list[tuple[date, date]] = []
+
+    async def variacoes_diarias(self, desde: date, ate: date) -> dict[date, Decimal]:
+        self.chamadas.append((desde, ate))
+        if self.falha:
+            return {}
+        dias = (desde + timedelta(days=i) for i in range((ate - desde).days + 1))
+        return {d: Decimal(f"{variacao_do_ibov(d):.10f}") for d in dias}
+
+
+@pytest.fixture
+def bcb() -> BcbFake:
+    return BcbFake()
+
+
+@pytest.fixture
+def ibov() -> IbovFake:
+    return IbovFake()
+
+
 @pytest.fixture
 def provedor() -> ProvedorFake:
     return ProvedorFake()
 
 
 @pytest_asyncio.fixture
-async def client(db: AsyncSession, provedor: ProvedorFake) -> AsyncIterator[AsyncClient]:
+async def client(
+    db: AsyncSession, provedor: ProvedorFake, bcb: BcbFake, ibov: IbovFake
+) -> AsyncIterator[AsyncClient]:
     """Cliente HTTP que fala com a aplicacao em memoria, sem porta de rede.
 
     `ASGITransport` chama a aplicacao direto. Nao ha servidor, nao ha socket, nao
@@ -149,6 +212,8 @@ async def client(db: AsyncSession, provedor: ProvedorFake) -> AsyncIterator[Asyn
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_provedor_de_cotacoes] = lambda: provedor
+    app.dependency_overrides[get_bcb_client] = lambda: bcb
+    app.dependency_overrides[get_ibov_client] = lambda: ibov
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test/api/v1") as ac:
         yield ac

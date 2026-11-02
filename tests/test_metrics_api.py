@@ -6,10 +6,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import numpy as np
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, PriceHistory
+from tests.conftest import CDI_DIARIO_FAKE
 from tests.factories import criar_ativo, op, usuario_logado
 
 
@@ -63,7 +65,8 @@ class TestCalculo:
         assert m["ticker"] == "PETR4"
         assert m["volatilidade_anualizada"] > 0
         assert m["maior_queda"] <= 0
-        assert corpo["taxa_livre_risco"] == 0.10
+        # A taxa e o CDI do BCB (o duble), nao mais o RISK_FREE_RATE do `.env`.
+        assert corpo["taxa_livre_risco"] == pytest.approx((1 + float(CDI_DIARIO_FAKE)) ** 252 - 1)
 
     async def test_correlacao_exige_dois_ativos(
         self, client: AsyncClient, db: AsyncSession
