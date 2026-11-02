@@ -8,7 +8,7 @@ conferidos à mão.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.bcb import BcbClient
 from app.clients.ibov import IbovClient
 from app.models.benchmark import BenchmarkRate, Indexador
+from app.services import benchmark_service
 from app.services.benchmark_service import curva_equivalente, curva_rentabilidade
+from tests.conftest import BcbFake
 from tests.factories import criar_ativo, op, usuario_logado
 
 
@@ -703,3 +705,70 @@ class TestProventosNoRetorno:
         curva = curva_rentabilidade(snaps, {}, {d(2): Decimal(10)})  # type: ignore[arg-type]
         # (1510 + 10 - 500) / 1000 - 1 = 0,02
         assert curva[-1].carteira == Decimal("0.02")
+
+
+class TestTaxaLivreDeRisco:
+    """A taxa do Sharpe e do Black-Litterman vem do CDI, nao do `.env`.
+
+    O `.env` ficou em 10% com a Selic a 13,75%. O numero nao estoura nada
+    quando esta velho -- so desloca a fronteira inteira em silencio --, entao
+    a origem dele viaja junto e aparece na tela.
+    """
+
+    HOJE = date(2026, 11, 3)
+
+    async def _gravar_cdi(self, db: AsyncSession, dia: date, taxa: str) -> None:
+        db.add(BenchmarkRate(indexador=Indexador.CDI, date=dia, rate=Decimal(taxa)))
+        await db.commit()
+
+    def test_anualiza_compondo_por_252_dias_uteis(self) -> None:
+        """Elevar, nao multiplicar: 0,050788% ao dia e 13,65% ao ano, e x252
+        daria 12,80% -- quase um ponto a menos com a Selic a 13,75%."""
+        taxa = benchmark_service.anualizar_taxa_diaria(Decimal("0.00050788"))
+
+        assert taxa == pytest.approx(0.1365, abs=1e-4)
+
+    async def test_cdi_recente_no_banco_dispensa_o_bcb(self, db: AsyncSession) -> None:
+        await self._gravar_cdi(db, self.HOJE - timedelta(days=1), "0.00050788")
+        bcb = BcbFake()
+
+        taxa = await benchmark_service.taxa_livre_risco(db, bcb, hoje=self.HOJE, reserva=0.10)
+
+        assert bcb.chamadas == []
+        assert taxa.valor == pytest.approx(0.1365, abs=1e-4)
+        assert taxa.data == self.HOJE - timedelta(days=1)
+        assert "02/11/2026" in taxa.fonte
+
+    async def test_sem_cdi_recente_busca_no_bcb_e_grava(self, db: AsyncSession) -> None:
+        bcb = BcbFake()
+
+        taxa = await benchmark_service.taxa_livre_risco(db, bcb, hoje=self.HOJE, reserva=0.10)
+
+        assert len(bcb.chamadas) == 1
+        assert taxa.data is not None
+        assert taxa.valor == pytest.approx(0.1365, abs=1e-4)
+        # Gravou: a segunda consulta ja nao pergunta ao BCB.
+        await benchmark_service.taxa_livre_risco(db, bcb, hoje=self.HOJE, reserva=0.10)
+        assert len(bcb.chamadas) == 1
+
+    async def test_bcb_fora_usa_o_ultimo_cdi_com_a_data_a_vista(self, db: AsyncSession) -> None:
+        """Um CDI de 20 dias atras e melhor que a reserva: a taxa muda devagar,
+        e a data na fonte mostra o atraso."""
+        await self._gravar_cdi(db, self.HOJE - timedelta(days=20), "0.00051000")
+        bcb = BcbFake()
+        bcb.falha = True
+
+        taxa = await benchmark_service.taxa_livre_risco(db, bcb, hoje=self.HOJE, reserva=0.10)
+
+        assert taxa.data == self.HOJE - timedelta(days=20)
+        assert taxa.valor > 0.13
+
+    async def test_sem_cdi_nenhum_cai_na_reserva_e_avisa(self, db: AsyncSession) -> None:
+        bcb = BcbFake()
+        bcb.falha = True
+
+        taxa = await benchmark_service.taxa_livre_risco(db, bcb, hoje=self.HOJE, reserva=0.1375)
+
+        assert taxa.valor == 0.1375
+        assert taxa.data is None
+        assert "reserva" in taxa.fonte

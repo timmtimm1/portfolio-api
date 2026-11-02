@@ -11,6 +11,7 @@ import itertools
 from datetime import date, timedelta
 from decimal import Decimal
 
+import numpy as np
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,9 +74,9 @@ async def criar_ativo(
     nome e casava com a busca por "PETR". Valor padrao compartilhado entre
     objetos distintos e uma armadilha classica de fabrica de teste.
     """
-    # `market_cap` fica None por padrao de proposito: e o estado do catalogo
-    # antes de a pipeline rodar, e e nele que o Black-Litterman cai para peso
-    # igual. O teste que quiser o prior de mercado de verdade pede o valor.
+    # `market_cap` fica None por padrao: e o estado do catalogo antes de a
+    # pipeline rodar. O Black-Litterman nao usa mais esse valor (o mercado e o
+    # Ibovespa), entao nenhum teste de otimizacao depende dele.
     ativo = Asset(
         ticker=ticker,
         nome=nome or f"Empresa {ticker}",
@@ -112,6 +113,17 @@ async def criar_historico(
         preco *= Decimal("1.01")
     await db.commit()
     return pontos
+
+
+def variacao_do_ibov(dia: date) -> float:
+    """Variacao sintetica do Ibovespa num dia, em fracao.
+
+    Deterministica pela DATA, nao por ordem de chamada: o duble do Yahoo e as
+    series de preco dos testes de otimizacao precisam enxergar o mesmo mercado
+    no mesmo dia, e cada um pede um pedaco diferente do calendario. Media de
+    0,04% e desvio de 1,2% ao dia, perto do Ibovespa real (~19% de vol ao ano).
+    """
+    return float(np.random.default_rng(dia.toordinal()).normal(0.0004, 0.012))
 
 
 async def segunda_conta(client: AsyncClient) -> dict[str, str]:

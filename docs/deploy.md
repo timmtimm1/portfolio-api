@@ -95,7 +95,7 @@ removido; o histórico está na migration `0fe51817224f`.
    | `SECRET_KEY` | ❓ gere com `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` |
    | `SERVICE_API_KEY` | ❓ gere com `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` — chave do cron de snapshots |
    | `LOG_JSON` | `true` |
-   | `RISK_FREE_RATE` | `0.10` (ou a Selic/CDI atual) |
+   | `RISK_FREE_RATE` | `0.1375` — só reserva: a taxa usada é o CDI mais recente do Banco Central |
    | `BRAPI_TOKEN` | opcional — deixe em branco ou pegue o seu em brapi.dev |
 
    `CORS_ORIGINS` fica **de fora** de propósito: o painel é servido pela

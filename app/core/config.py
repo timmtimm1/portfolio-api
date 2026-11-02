@@ -152,8 +152,12 @@ class Settings(BaseSettings):
     # teve Sharpe negativo: entregou menos que o Tesouro Selic assumindo risco de
     # renda variavel.
     #
-    # Fica configuravel porque a Selic muda: ajuste no .env conforme o COPOM.
-    RISK_FREE_RATE: float = 0.10
+    # E so a RESERVA: a taxa usada de fato e o CDI mais recente do Banco Central
+    # (`benchmark_service.taxa_livre_risco`). Este valor entra apenas quando o
+    # BCB nao responde e o banco nao tem CDI dos ultimos 45 dias -- e a tela
+    # avisa quando isso acontece. Ajustado a mao, ele ficou em 10% com a Selic a
+    # 13,75%.
+    RISK_FREE_RATE: float = 0.1375
 
     # Origens permitidas para CORS. Lista explicita, nunca "*" junto com credenciais.
     #
