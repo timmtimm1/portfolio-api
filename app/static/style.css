@@ -1,30 +1,57 @@
-/* Portfolio Tracker — tema escuro, superfícies de vidro, acento violeta.
-   Sem fontes externas: a CSP não libera fonts.googleapis, e a pilha de sistema
-   renderiza bem em Linux, macOS e Windows sem uma requisição a mais. */
+/* Portfolio Tracker — tema "cédula": papel azul-água sobre mesa verde-sálvia,
+   tinta de gravura azul-marinho, filete duplo nas bordas, guilhoché em baixa
+   opacidade e uma faixa holográfica como acento.
+
+   Só inspiração de cores, texturas e molduras: nada de texto, brasão ou retrato
+   de nota real. Sem fontes externas: a CSP não libera fonts.googleapis, e a
+   pilha de sistema renderiza bem em Linux, macOS e Windows sem uma requisição a
+   mais. Texturas são gradientes CSS ou SVG em `data:` URI (a CSP só libera
+   `img-src 'self' data:`). */
 
 :root {
-  --bg:        #08070f;
-  --bg-2:      #0c0b16;
-  --superficie: rgba(23, 21, 38, .72);
-  --superficie-2: rgba(31, 28, 50, .55);
-  --borda:     rgba(255, 255, 255, .07);
-  --borda-forte: rgba(255, 255, 255, .13);
+  /* Mesa e papel */
+  --salvia:    #c9dcc8;
+  --salvia-2:  #b7cfb6;
+  --papel:     #e4f2f0;
+  --papel-2:   #d6ecec;
+  --papel-3:   #c3e2e4;
+  --campo:     #f3fbfa;     /* campos de entrada: um tom mais claro que o papel */
+  --agua:      #cfe9ea;
+  --turquesa:  #8fd0d6;
+  --turquesa-2:#5fb3c1;
 
-  --txt:       #e9e7f3;
-  --txt-2:     #a9a4c2;
-  --txt-3:     #6f6a8c;
+  /* Tinta de gravura. Os três tons de texto passam de 4,5:1 sobre o papel (o
+     terciário passa de 4,5:1 também sobre a mesa verde -- ver o script de
+     contraste fora do repositório). */
+  --tinta:     #1f3b57;
+  --tinta-2:   #2d4f6e;
+  --tinta-3:   #3f6077;
+  --filete:       rgba(31, 59, 87, .16);
+  --filete-medio: rgba(31, 59, 87, .30);
+  --filete-forte: rgba(31, 59, 87, .48);
 
-  --violeta:   #7b5cff;
-  --violeta-2: #a78bfa;
-  --magenta:   #ff4fa3;
-  --ciano:     #35d6e8;
-  --ouro:      #f5b54a;
-  --verde:     #34d399;
-  --vermelho:  #fb7185;
+  /* Acentos de texto (escuros o bastante para ler sobre o papel) e as cores
+     "cheias" usadas nos gráficos. */
+  --turquesa-esc: #17606b;
+  --cobre-esc:    #86512f;
+  --cobre:        #a0623f;
+  --sage-esc:     #4e7d4f;
+  --positivo:     #2a6638;
+  --negativo:     #a2352f;
+  --tijolo:       #b3433b;
 
-  --r:   18px;
-  --r-s: 12px;
-  --sombra: 0 18px 50px -18px rgba(0, 0, 0, .85);
+  /* Faixa holográfica: prata -> cobre -> violeta acinzentado -> turquesa. */
+  --holo: linear-gradient(180deg, #cdbfae 0%, #9c7a66 26%, #7f6f92 52%, #8fd3d8 78%, #cdbfae 100%);
+  /* Duas voltas do espectro numa imagem de 200% de altura: parada, mostra a
+     primeira volta inteira; no hover desliza para a segunda, e o "brilho" é só
+     essa troca. */
+  --holo-brilho: linear-gradient(180deg, #cdbfae 0%, #9c7a66 12%, #7f6f92 25%, #8fd3d8 37%, #cdbfae 50%, #9c7a66 62%, #7f6f92 75%, #8fd3d8 87%, #cdbfae 100%);
+
+  --r:   8px;
+  --r-s: 6px;
+  --sombra: 0 12px 28px -16px rgba(31, 59, 87, .45);
+
+  --serie: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
 
 * { box-sizing: border-box; }
@@ -42,24 +69,61 @@
 
 html, body { height: 100%; }
 
+/* Foco visível em tudo que se opera: o contorno é o único sinal confiável para
+   quem navega por teclado, e vários campos abaixo trocam a borda por um tom que
+   sozinho quase não se vê. `:focus-visible` não polui o clique de mouse. */
+:focus-visible { outline: 2px solid var(--turquesa-esc); outline-offset: 2px; }
+
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--txt);
+  background-color: var(--salvia);
+  color: var(--tinta);
   font: 400 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  /* Brilhos radiais fixos: dão a profundidade da referência sem imagem nenhuma
-     (a CSP bloquearia imagem externa, e um PNG de fundo pesaria em cada visita). */
+  /* Luz suave de cima: dá o ar de papel iluminado sem imagem nenhuma. */
   background-image:
-    radial-gradient(900px 520px at 12% -8%,  rgba(123, 92, 255, .20), transparent 62%),
-    radial-gradient(760px 460px at 88% 4%,   rgba(255, 79, 163, .13), transparent 60%),
-    radial-gradient(900px 700px at 50% 110%, rgba(53, 214, 232, .09), transparent 62%);
+    radial-gradient(900px 520px at 14% -10%, rgba(255, 255, 255, .42), transparent 62%),
+    radial-gradient(800px 600px at 100% 110%, rgba(143, 208, 214, .28), transparent 62%);
   background-attachment: fixed;
+}
+
+/* Guilhoché da mesa: ondas concêntricas e uma roseta radial em dois cantos,
+   mascaradas para sumir antes do conteúdo. Fica atrás de tudo (z-index
+   negativo) e não recebe clique. */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    repeating-radial-gradient(circle at 0% 100%, transparent 0 9px, rgba(31, 59, 87, .10) 9px 10px),
+    repeating-conic-gradient(from 0deg at 0% 100%, rgba(31, 59, 87, .07) 0 .5deg, transparent .5deg 4.5deg),
+    repeating-radial-gradient(circle at 100% 0%, transparent 0 11px, rgba(31, 59, 87, .09) 11px 12px),
+    repeating-conic-gradient(from 0deg at 100% 0%, rgba(31, 59, 87, .06) 0 .5deg, transparent .5deg 5.5deg);
+  -webkit-mask-image:
+    radial-gradient(ellipse 46% 58% at 0% 100%, #000, transparent),
+    radial-gradient(ellipse 42% 52% at 100% 0%, #000, transparent);
+  mask-image:
+    radial-gradient(ellipse 46% 58% at 0% 100%, #000, transparent),
+    radial-gradient(ellipse 42% 52% at 100% 0%, #000, transparent);
 }
 
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; }
 h1, h2, h3, p { margin: 0; }
+
+/* ══ Acentos compartilhados ══ */
+
+/* Faixa holográfica vertical, como a da nota: fica na borda esquerda de quem
+   merece destaque (login, KPIs, cartão do patrimônio). O brilho só se move no
+   hover -- parada, é uma borda; em movimento contínuo seria ruído. */
+.login-card::after, .kpi::after, .cartao-destaque::after {
+  content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 6px;
+  border-radius: 0 3px 3px 0;
+  background: var(--holo-brilho);
+  background-size: 100% 200%; background-position: 0 0;
+  box-shadow: 0 0 0 1px rgba(31, 59, 87, .22);
+  transition: background-position .9s ease;
+}
+.login-card:hover::after, .kpi:hover::after, .cartao-destaque:hover::after { background-position: 0 100%; }
 
 /* ══ Login ══ */
 .login-tela {
@@ -69,42 +133,64 @@ h1, h2, h3, p { margin: 0; }
   padding: 24px;
 }
 .login-card {
-  width: min(400px, 100%);
-  background: var(--superficie);
-  border: 1px solid var(--borda);
-  border-radius: 22px;
-  padding: 34px 30px;
-  box-shadow: var(--sombra);
-  backdrop-filter: blur(22px);
+  position: relative; isolation: isolate; overflow: hidden;
+  width: min(420px, 100%);
+  background: linear-gradient(160deg, #eaf6f4, var(--papel) 60%, var(--agua));
+  border: 1px solid var(--filete-forte);
+  border-radius: 10px;
+  padding: 36px 32px 32px 38px;
+  /* Filete duplo: o fio externo é a borda, o interno é a sombra recuada. */
+  box-shadow:
+    inset 0 0 0 4px var(--papel), inset 0 0 0 5px var(--filete-medio),
+    var(--sombra);
   display: grid;
   gap: 16px;
 }
-.login-sub { color: var(--txt-2); font-size: 13px; margin-bottom: 6px; }
-.login-rodape { color: var(--txt-3); font-size: 13px; text-align: center; }
+/* Roseta de guilhoché no canto: ondas + raios finos, mascarados em círculo. */
+.login-card::before, .cartao::before {
+  content: "";
+  position: absolute; top: 0; right: 0; width: 210px; height: 210px; z-index: -1;
+  pointer-events: none; opacity: .12; border-radius: 0 var(--r) 0 0;
+  background:
+    repeating-radial-gradient(circle at 100% 0%, transparent 0 5px, var(--tinta) 5px 5.6px),
+    repeating-conic-gradient(from 0deg at 100% 0%, var(--tinta) 0 .5deg, transparent .5deg 6deg);
+  -webkit-mask-image: radial-gradient(circle at 100% 0%, #000 0, transparent 72%);
+  mask-image: radial-gradient(circle at 100% 0%, #000 0, transparent 72%);
+}
+.login-sub { color: var(--tinta-2); font-size: 13px; margin-bottom: 6px; }
+.login-rodape { color: var(--tinta-3); font-size: 13px; text-align: center; }
 /* Aviso positivo do login (conta criada, e-mail confirmado): verde, para nao ser
    lido como erro por quem so bate o olho. */
 .login-aviso {
-  color: var(--verde, #4ade80); font-size: 13px; line-height: 1.45;
-  background: rgba(74, 222, 128, .08); border: 1px solid rgba(74, 222, 128, .25);
+  color: var(--positivo); font-size: 13px; line-height: 1.45;
+  background: rgba(42, 102, 56, .09); border: 1px solid rgba(42, 102, 56, .32);
   border-radius: var(--r-s); padding: 10px 12px;
 }
 
 .campo { display: grid; gap: 7px; }
-.campo > span { font-size: 12px; color: var(--txt-2); font-weight: 500; }
+.campo > span {
+  font-size: 11px; color: var(--tinta-2); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+/* `.campo > span` pega também os <span> que embrulham o campo (preço, data) e a
+   dica: sem este reset, o texto digitado herdava caixa alta e negrito do rótulo. */
+.campo > .campo-preco, .campo > .campo-data {
+  font-size: 14px; font-weight: 400; color: var(--tinta); text-transform: none; letter-spacing: normal;
+}
+.campo > .campo-dica { font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--tinta-3); }
 .campo input, .campo select {
-  background: rgba(10, 9, 20, .65);
-  border: 1px solid var(--borda);
+  background: var(--campo);
+  border: 1px solid var(--filete-forte);
   border-radius: var(--r-s);
   padding: 11px 13px;
-  outline: none;
   transition: border-color .16s, box-shadow .16s;
   width: 100%;
 }
 .campo input:focus, .campo select:focus {
-  border-color: var(--violeta);
-  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
+  border-color: var(--tinta);
+  box-shadow: 0 0 0 3px rgba(31, 59, 87, .14);
 }
-.campo input::placeholder { color: var(--txt-3); }
+.campo input::placeholder { color: var(--tinta-3); }
 
 /* "Mostrar senha": o jeito mais rapido de o usuario descobrir que colou um
    espaco a mais ou um caractere errado -- a causa mais comum de "minha senha
@@ -113,23 +199,23 @@ h1, h2, h3, p { margin: 0; }
 .campo-senha input { padding-right: 76px; }
 .campo-senha button {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  font-size: 11.5px; font-weight: 600; color: var(--violeta-2);
-  padding: 6px 10px; border-radius: 8px;
+  font-size: 11.5px; font-weight: 700; color: var(--turquesa-esc);
+  padding: 6px 10px; border-radius: 5px;
 }
-.campo-senha button:hover { background: rgba(123, 92, 255, .14); }
+.campo-senha button:hover { background: rgba(31, 59, 87, .09); }
 
 .campo-preco { position: relative; display: block; }
 .campo-preco input { padding-right: 92px; }
 .campo-preco button {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  font-size: 11px; font-weight: 600; color: var(--violeta-2);
-  padding: 6px 9px; border-radius: 8px; white-space: nowrap;
+  font-size: 11px; font-weight: 700; color: var(--turquesa-esc);
+  padding: 6px 9px; border-radius: 5px; white-space: nowrap;
 }
-.campo-preco button:hover:not(:disabled) { background: rgba(123, 92, 255, .14); }
-.campo-preco button:disabled { color: var(--txt-3); cursor: default; }
+.campo-preco button:hover:not(:disabled) { background: rgba(31, 59, 87, .09); }
+.campo-preco button:disabled { color: var(--tinta-3); cursor: default; }
 
 /* Diz de onde veio o numero, para o preenchimento nao parecer magica. */
-.campo-dica { display: block; font-size: 11.5px; color: var(--txt-3); margin-top: 4px; }
+.campo-dica { display: block; font-size: 11.5px; color: var(--tinta-3); margin-top: 4px; }
 
 /* Data: o <input type="date"> nativo desenha a data no idioma do NAVEGADOR,
    nao no da pagina -- com o Chrome em ingles sai mm/dd/aaaa mesmo sob
@@ -148,15 +234,11 @@ h1, h2, h3, p { margin: 0; }
 .campo-data > button {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   display: grid; place-items: center;
-  width: 32px; height: 32px; border-radius: 8px;
-  color: var(--txt-2);
+  width: 32px; height: 32px; border-radius: 5px;
+  color: var(--tinta-2);
   transition: background .16s, color .16s;
 }
-.campo-data > button:hover { background: rgba(123, 92, 255, .14); color: var(--violeta-2); }
-.campo-data > button:focus-visible {
-  outline: none; background: rgba(123, 92, 255, .14);
-  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
-}
+.campo-data > button:hover { background: rgba(31, 59, 87, .09); color: var(--tinta); }
 .campo-data svg {
   width: 17px; height: 17px;
   fill: none; stroke: currentColor; stroke-width: 1.7;
@@ -166,29 +248,32 @@ h1, h2, h3, p { margin: 0; }
 .btn {
   border-radius: var(--r-s);
   padding: 11px 18px;
-  font-weight: 600;
-  font-size: 13px;
-  transition: transform .12s, filter .16s, background .16s;
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: .06em;
+  transition: transform .12s, filter .16s, background .16s, color .16s;
 }
 .btn:active { transform: translateY(1px); }
+/* Botão cheio de tinta, com um fio claro recuado: o mesmo filete duplo dos
+   cartões, em miniatura. */
 .btn--primario {
-  background: linear-gradient(135deg, var(--violeta), #5b3ce0);
-  color: #fff;
-  box-shadow: 0 10px 26px -10px rgba(123, 92, 255, .85);
+  background: linear-gradient(135deg, var(--tinta), var(--tinta-2));
+  color: #eef8f7;
+  box-shadow: inset 0 0 0 2px var(--tinta), inset 0 0 0 3px rgba(238, 248, 247, .32), 0 8px 16px -10px rgba(31, 59, 87, .8);
 }
-.btn--primario:hover { filter: brightness(1.1); }
-.btn--fantasma { background: rgba(255,255,255,.05); border: 1px solid var(--borda); color: var(--txt-2); }
-.btn--fantasma:hover { background: rgba(255,255,255,.09); color: var(--txt); }
-.btn--pequeno { padding: 8px 14px; font-size: 12.5px; }
-.btn--sair { color: var(--txt-3); text-align: left; padding: 10px 12px; font-weight: 500; }
-.btn--sair:hover { color: var(--vermelho); }
+.btn--primario:hover { filter: brightness(1.14); }
+.btn--fantasma { background: rgba(255, 255, 255, .35); border: 1px solid var(--filete-forte); color: var(--tinta-2); }
+.btn--fantasma:hover { background: rgba(255, 255, 255, .7); color: var(--tinta); }
+.btn--pequeno { padding: 8px 14px; font-size: 12px; }
+.btn--sair { color: var(--tinta-3); text-align: left; padding: 10px 12px; font-weight: 600; letter-spacing: .02em; }
+.btn--sair:hover { color: var(--negativo); }
 
-.link { color: var(--violeta-2); font-weight: 600; font-size: 13px; }
+.link { color: var(--turquesa-esc); font-weight: 700; font-size: 13px; }
 .link:hover { text-decoration: underline; }
 .erro {
-  color: var(--vermelho); font-size: 12.5px;
-  background: rgba(251, 113, 133, .1);
-  border: 1px solid rgba(251, 113, 133, .25);
+  color: var(--negativo); font-size: 12.5px;
+  background: rgba(162, 53, 47, .08);
+  border: 1px solid rgba(162, 53, 47, .32);
   border-radius: var(--r-s); padding: 9px 12px;
 }
 
@@ -196,69 +281,88 @@ h1, h2, h3, p { margin: 0; }
 .shell { display: grid; grid-template-columns: 244px 1fr; min-height: 100vh; }
 
 .lateral {
-  border-right: 1px solid var(--borda);
-  padding: 22px 16px;
+  padding: 22px 22px 22px 16px;
   display: flex; flex-direction: column; gap: 8px;
-  background: linear-gradient(180deg, rgba(16,14,28,.6), rgba(8,7,15,.3));
+  /* Papel um tom mais escuro que o dos cartões, com a faixa holográfica
+     desenhada na borda direita como camada de fundo: camada de fundo não rola
+     junto com o conteúdo, ao contrário de um pseudo-elemento absoluto. */
+  background:
+    var(--holo) right 0 top 0 / 7px 100% no-repeat,
+    linear-gradient(180deg, rgba(228, 242, 240, .82), rgba(195, 226, 228, .72));
+  border-right: 1px solid var(--filete-forte);
   position: sticky; top: 0; height: 100vh;
   /* Numa tela de notebook (768px de altura) o cartao de dica empurra o rodape
      para fora dos 100vh. Sem rolagem propria, o botao "Sair" simplesmente nao
      existia para quem precisava trocar de conta. */
   overflow-y: auto;
 }
-.marca { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 15.5px; padding: 4px 8px 18px; }
-.marca--grande { justify-content: center; font-size: 18px; padding-bottom: 4px; }
+.marca {
+  display: flex; align-items: center; gap: 11px; padding: 4px 8px 18px;
+  font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: .16em;
+}
+.marca--grande { justify-content: center; font-size: 15px; padding-bottom: 4px; }
 .marca-icone {
-  width: 30px; height: 30px; border-radius: 9px; flex: 0 0 auto;
-  background: linear-gradient(135deg, var(--violeta), var(--magenta));
-  box-shadow: 0 6px 18px -6px rgba(123, 92, 255, .9);
+  width: 30px; height: 30px; border-radius: 7px; flex: 0 0 auto;
+  /* Tinta de fundo, uma faixa holográfica miúda à esquerda e filete interno. */
+  background:
+    var(--holo) left 4px top 5px / 3px 20px no-repeat,
+    linear-gradient(135deg, var(--tinta), var(--tinta-2));
+  box-shadow: inset 0 0 0 1px rgba(238, 248, 247, .35), 0 5px 12px -6px rgba(31, 59, 87, .8);
   position: relative;
 }
 .marca-icone::after {
   content: ""; position: absolute; inset: 0;
   background: no-repeat center/16px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M5 19v-6M12 19V6M19 19v-4'/%3E%3C/svg%3E");
+  transform: translateX(2px);
 }
 
-.lateral-titulo { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--txt-3); padding: 6px 10px; }
+.lateral-titulo {
+  font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; font-weight: 700;
+  color: var(--tinta-3); padding: 6px 10px;
+}
 .nav { display: grid; gap: 3px; }
 
 .seletor-carteira { display: flex; gap: 6px; padding: 0 4px 6px; }
 .seletor-carteira select {
   flex: 1; min-width: 0;
-  background: var(--superficie-2); border: 1px solid var(--borda);
-  border-radius: var(--r-s); padding: 8px 10px; font-size: 12.5px; outline: none;
+  background: var(--campo); border: 1px solid var(--filete-forte);
+  border-radius: var(--r-s); padding: 8px 10px; font-size: 12.5px;
 }
-.seletor-carteira select:focus { border-color: rgba(123, 92, 255, .5); }
+.seletor-carteira select:focus { border-color: var(--tinta); }
 .seletor-carteira button {
   width: 34px; flex: 0 0 auto; border-radius: var(--r-s);
-  background: rgba(123, 92, 255, .16); color: var(--violeta-2);
-  font-size: 17px; font-weight: 600; line-height: 1;
+  background: rgba(31, 59, 87, .10); color: var(--tinta-2);
+  font-size: 17px; font-weight: 700; line-height: 1;
 }
-.seletor-carteira button:hover { background: rgba(123, 92, 255, .28); }
+.seletor-carteira button:hover { background: rgba(31, 59, 87, .2); }
 .btn--nova-simulada { display: block; width: calc(100% - 8px); margin: 0 4px 10px; text-align: center; }
 .form-nova-carteira { display: grid; gap: 8px; padding: 0 4px 12px; }
 .form-nova-carteira .form-acoes { justify-content: stretch; }
 .form-nova-carteira .form-acoes .btn { flex: 1; }
-/* Simulada em âmbar: a cor sinaliza "isto não é dinheiro seu" antes de a pessoa
+/* Simulada em cobre: a cor sinaliza "isto não é dinheiro seu" antes de a pessoa
    ler o rótulo. Confundir simulação com posição real é o erro que este projeto
    inteiro não pode cometer. */
 .pilula--simulada {
-  color: var(--ouro); border-color: rgba(245, 181, 74, .35); background: rgba(245, 181, 74, .12);
+  color: var(--cobre-esc); border-color: rgba(160, 98, 63, .5); background: rgba(160, 98, 63, .12);
 }
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   padding: 10px 12px; border-radius: var(--r-s);
-  color: var(--txt-2); font-weight: 500; font-size: 13.5px;
+  color: var(--tinta-2); font-weight: 600; font-size: 13.5px;
+  border: 1px solid transparent;
   transition: background .15s, color .15s;
 }
-.nav-item:hover { background: rgba(255,255,255,.05); color: var(--txt); }
+.nav-item:hover { background: rgba(255, 255, 255, .55); color: var(--tinta); }
+/* Item ativo em tinta cheia, como o "valor de face" da nota: o único bloco
+   escuro da barra, então a posição atual se acha sem ler. */
 .nav-item.is-ativo {
-  background: linear-gradient(135deg, rgba(123,92,255,.24), rgba(123,92,255,.07));
-  border: 1px solid rgba(123,92,255,.3);
-  color: var(--txt);
+  background: linear-gradient(135deg, var(--tinta), var(--tinta-2));
+  border-color: var(--tinta);
+  box-shadow: inset 0 0 0 1px rgba(238, 248, 247, .26);
+  color: #eef8f7;
 }
-.nav-seta { margin-left: auto; color: var(--violeta-2); }
-.nav-ic { width: 17px; height: 17px; flex: 0 0 auto; opacity: .85; background: currentColor; }
+.nav-seta { margin-left: auto; color: #8fd3d8; }
+.nav-ic { width: 17px; height: 17px; flex: 0 0 auto; opacity: .9; background: currentColor; }
 .nav-ic[data-ic="grid"]   { mask: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1.5'/%3E%3C/svg%3E"); }
 .nav-ic[data-ic="wallet"] { mask: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3Cpath d='M16 12h4'/%3E%3C/svg%3E"); }
 .nav-ic[data-ic="chart"]  { mask: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 19V5'/%3E%3Cpath d='M4 15c5 0 6-9 16-9'/%3E%3C/svg%3E"); }
@@ -266,17 +370,19 @@ h1, h2, h3, p { margin: 0; }
 
 .lateral-rodape { margin-top: auto; display: grid; gap: 8px; }
 .cartao-dica {
-  background: var(--superficie-2);
-  border: 1px solid var(--borda);
+  background: rgba(255, 255, 255, .45);
+  border: 1px solid var(--filete-medio);
   border-radius: var(--r);
-  padding: 16px; text-align: center;
+  box-shadow: inset 0 0 0 3px rgba(228, 242, 240, .7), inset 0 0 0 4px var(--filete);
+  padding: 18px 16px; text-align: center;
 }
 .cartao-dica strong { display: block; margin: 8px 0 5px; font-size: 13.5px; }
-.cartao-dica p { color: var(--txt-3); font-size: 11.5px; line-height: 1.5; margin-bottom: 12px; }
+.cartao-dica p { color: var(--tinta-2); font-size: 11.5px; line-height: 1.5; margin-bottom: 12px; }
 .cartao-dica .btn { width: 100%; }
 .dica-ic {
   width: 38px; height: 38px; border-radius: 50%; margin: 0 auto; display: block;
-  background: rgba(123,92,255,.18) no-repeat center/17px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a78bfa' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M18 6l1.5-1.5M6 18l-1.5 1.5M18 18l1.5 1.5'/%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3C/svg%3E");
+  background: var(--agua) no-repeat center/17px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2317606b' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M18 6l1.5-1.5M6 18l-1.5 1.5M18 18l1.5 1.5'/%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3C/svg%3E");
+  box-shadow: 0 0 0 1px var(--filete-medio), 0 0 0 4px rgba(143, 208, 214, .35);
 }
 
 .principal { padding: 20px 26px 44px; min-width: 0; }
@@ -285,29 +391,29 @@ h1, h2, h3, p { margin: 0; }
 .topo { display: flex; align-items: center; gap: 20px; margin-bottom: 26px; }
 .busca { position: relative; flex: 1; max-width: 440px; }
 .busca input {
-  width: 100%; background: var(--superficie); border: 1px solid var(--borda);
-  border-radius: 999px; padding: 11px 16px 11px 42px; outline: none;
+  width: 100%; background: var(--campo); border: 1px solid var(--filete-forte);
+  border-radius: 999px; padding: 11px 16px 11px 42px;
 }
-.busca input:focus { border-color: rgba(123,92,255,.5); }
+.busca input:focus { border-color: var(--tinta); }
 .busca-ic {
   position: absolute; left: 15px; top: 50%; transform: translateY(-50%);
-  width: 15px; height: 15px; opacity: .55;
-  background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a4c2' stroke-width='2.2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  width: 15px; height: 15px; opacity: .8;
+  background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233f6077' stroke-width='2.2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
 }
 .busca-resultados {
   position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 30;
-  background: #14121f; border: 1px solid var(--borda-forte);
+  background: var(--papel); border: 1px solid var(--filete-forte);
   border-radius: var(--r-s); overflow: hidden; box-shadow: var(--sombra);
   max-height: 300px; overflow-y: auto;
 }
 .busca-resultados button {
   display: flex; width: 100%; gap: 10px; padding: 10px 14px; text-align: left;
-  border-bottom: 1px solid var(--borda);
+  border-bottom: 1px solid var(--filete);
 }
 .busca-resultados button:last-child { border-bottom: 0; }
-.busca-resultados button:hover { background: rgba(123,92,255,.14); }
-.busca-resultados b { min-width: 62px; }
-.busca-resultados span { color: var(--txt-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.busca-resultados button:hover { background: rgba(31, 59, 87, .08); }
+.busca-resultados b { min-width: 62px; font-family: var(--serie); letter-spacing: .08em; }
+.busca-resultados span { color: var(--tinta-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .usuario { position: relative; margin-left: auto; }
 .usuario-chip {
@@ -315,44 +421,57 @@ h1, h2, h3, p { margin: 0; }
   background: none; border: 0; padding: 4px; border-radius: var(--r);
   cursor: pointer; color: inherit; font: inherit;
 }
-.usuario-chip:hover { background: var(--superficie-2); }
+.usuario-chip:hover { background: rgba(255, 255, 255, .5); }
 .usuario-menu {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 40;
   min-width: 220px; padding: 6px;
-  /* Opaco, nao `--superficie-2`: as superficies do tema sao translucidas de
-     proposito, e um menu flutuante translucido deixa o texto de tras atravessar
-     as opcoes -- ilegivel exatamente no momento em que precisa ser lido. */
-  background: #1b1930; border: 1px solid var(--borda-forte);
-  border-radius: var(--r); box-shadow: 0 18px 40px -12px rgba(0,0,0,.7);
+  /* Opaco: um menu flutuante translucido deixa o texto de tras atravessar as
+     opcoes -- ilegivel exatamente no momento em que precisa ser lido. */
+  background: var(--papel); border: 1px solid var(--filete-forte);
+  border-radius: var(--r); box-shadow: 0 18px 36px -14px rgba(31, 59, 87, .5);
 }
 .usuario-menu-conta {
-  font-size: 11.5px; color: var(--txt-3);
+  font-size: 11.5px; color: var(--tinta-3);
   padding: 8px 10px 9px; margin-bottom: 4px;
-  border-bottom: 1px solid var(--borda);
+  border-bottom: 1px solid var(--filete);
   overflow-wrap: anywhere;
 }
 .usuario-menu-item {
   display: block; width: 100%; text-align: left;
   background: none; border: 0; border-radius: var(--r-s);
-  padding: 9px 10px; font: inherit; font-size: 13px; color: var(--txt-3);
+  padding: 9px 10px; font: inherit; font-size: 13px; color: var(--tinta-2);
   cursor: pointer;
 }
-.usuario-menu-item:hover { background: rgba(251, 113, 133, .1); color: var(--vermelho); }
+.usuario-menu-item:hover { background: rgba(162, 53, 47, .1); color: var(--negativo); }
 .usuario-txt { text-align: right; line-height: 1.3; }
 .usuario-txt strong { font-size: 13px; display: block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.usuario-txt span { font-size: 11.5px; color: var(--txt-3); }
+.usuario-txt span { font-size: 11.5px; color: var(--tinta-3); }
 .avatar {
   width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--violeta), var(--magenta));
-  font-weight: 700; font-size: 14px; color: #fff;
+  background: linear-gradient(135deg, var(--tinta), var(--tinta-2));
+  box-shadow: 0 0 0 2px var(--papel), 0 0 0 3px var(--filete-forte);
+  font-weight: 800; font-size: 14px; color: #eef8f7;
 }
 
 /* ══ Cartões ══ */
 .titulo-linha { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
-.titulo-linha h1 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.titulo-linha h1 { font-size: 20px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+/* Faixa de microtexto sob o título, como a das bordas da nota. É só textura:
+   o texto vem de `content` com alternativa vazia (`/ ""`) para a leitora de
+   tela não ler uma linha repetida em cada tela. A segunda declaração é o
+   recuo para navegador sem a sintaxe de alternativa. */
+.titulo-linha::after {
+  content: "PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3";
+  content: "PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3 \00B7  PORTFOLIO TRACKER \00B7  CARTEIRA DA B3" / "";
+  flex: 0 0 100%; order: 99; height: 10px; overflow: hidden; white-space: nowrap;
+  font-size: 7px; line-height: 10px; letter-spacing: .38em; font-weight: 700;
+  color: rgba(31, 59, 87, .45);
+  border-top: 3px double var(--filete-medio); padding-top: 3px; box-sizing: content-box;
+  user-select: none;
+}
 .selo {
-  margin-left: auto; font-size: 11.5px; color: var(--txt-3);
-  background: var(--superficie-2); border: 1px solid var(--borda);
+  margin-left: auto; font-size: 11.5px; color: var(--tinta-2); font-family: var(--serie); letter-spacing: .05em;
+  background: var(--papel); border: 1px solid var(--filete-medio);
   padding: 5px 11px; border-radius: 999px;
 }
 .controles { margin-left: auto; display: flex; align-items: flex-end; gap: 12px; }
@@ -360,24 +479,33 @@ h1, h2, h3, p { margin: 0; }
 
 /* Ghost padrao, mas com aviso: e uma acao destrutiva, e a cor sinaliza isso
    sem precisar de um botao vermelho cheio competindo com o "Nova operação". */
-.btn--zerar { color: var(--txt-3); }
-.btn--zerar:hover { color: var(--vermelho); background: rgba(251, 113, 133, .1); }
+.btn--zerar { color: var(--tinta-3); }
+.btn--zerar:hover { color: var(--negativo); background: rgba(162, 53, 47, .1); }
 .controle { display: grid; gap: 5px; }
-.controle span { font-size: 11px; color: var(--txt-3); }
-.controle select { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--r-s); padding: 7px 11px; outline: none; }
+.controle span { font-size: 11px; color: var(--tinta-3); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.controle select { background: var(--campo); border: 1px solid var(--filete-forte); border-radius: var(--r-s); padding: 7px 11px; }
 
+/* O "papel": azul-água com linhas finíssimas de gravura, moldura de filete
+   duplo (borda + sombra recuada) e a roseta de guilhoché no canto. O
+   `isolation` cria o contexto de empilhamento em que a roseta, com z-index
+   negativo, fica acima do fundo do cartão e abaixo do conteúdo; o
+   `overflow: hidden` impede que ela vaze para fora de um cartão pequeno. */
 .cartao {
-  background: var(--superficie);
-  border: 1px solid var(--borda);
+  position: relative; isolation: isolate; overflow: hidden;
+  background:
+    repeating-linear-gradient(0deg, rgba(31, 59, 87, .022) 0 1px, transparent 1px 4px),
+    linear-gradient(160deg, #eaf6f4, var(--papel) 58%, var(--agua));
+  border: 1px solid var(--filete-forte);
   border-radius: var(--r);
   padding: 20px;
-  backdrop-filter: blur(16px);
-  box-shadow: var(--sombra);
+  box-shadow:
+    inset 0 0 0 3px var(--papel), inset 0 0 0 4px var(--filete-medio),
+    var(--sombra);
 }
 .cartao-cabeca { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 18px; }
-.cartao-cabeca h2 { font-size: 15px; font-weight: 650; }
+.cartao-cabeca h2 { font-size: 13px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .cartao-cabeca .link, .cartao-cabeca .legenda { margin-left: auto; }
-.sub { color: var(--txt-3); font-size: 12px; margin-top: 3px; }
+.sub { color: var(--tinta-3); font-size: 12px; margin-top: 3px; }
 
 /* Quando o indexador foi pedido e a comparação falhou (BCB fora do ar, IPCA
    do mês ainda não publicado), a carteira continua sendo exibida normalmente
@@ -385,53 +513,76 @@ h1, h2, h3, p { margin: 0; }
    inteiro; aqui o gráfico está certo, então o aviso é uma linha discreta ao
    lado do título, não um bloco que toma a tela. */
 .aviso-comparacao {
-  color: var(--txt-3); font-size: 11.5px; margin-top: 5px;
+  color: var(--tinta-3); font-size: 11.5px; margin-top: 5px;
   display: flex; align-items: center; gap: 5px;
 }
-.aviso-comparacao::before { content: "○"; font-size: 9px; color: var(--txt-3); }
+.aviso-comparacao::before { content: "○"; font-size: 9px; color: var(--tinta-3); }
 
 .grade-topo { display: grid; grid-template-columns: 1fr 320px; gap: 18px; margin-bottom: 18px; }
 .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-.kpi { padding: 17px 18px; }
+.kpi { padding: 17px 18px 17px 26px; }
 .kpi-ic {
-  width: 34px; height: 34px; border-radius: 10px; display: block; margin-bottom: 14px;
-  background-color: rgba(123,92,255,.16); background-repeat: no-repeat; background-position: center; background-size: 17px;
+  width: 34px; height: 34px; border-radius: 8px; display: block; margin-bottom: 14px;
+  box-shadow: 0 0 0 1px var(--filete-medio);
+  background-color: rgba(31, 59, 87, .10); background-repeat: no-repeat; background-position: center; background-size: 17px;
 }
-.kpi-ic[data-ic="wallet"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a78bfa' stroke-width='2'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3Cpath d='M16 12h4'/%3E%3C/svg%3E"); }
-.kpi-ic[data-ic="cost"]   { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2335d6e8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/%3E%3C/svg%3E"); background-color: rgba(53,214,232,.14); }
-.kpi-ic[data-ic="up"]     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ff4fa3' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m3 17 6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E"); background-color: rgba(255,79,163,.14); }
-.kpi-ic[data-ic="check"]  { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2334d399' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='m4 12 5 5L20 6'/%3E%3C/svg%3E"); background-color: rgba(52,211,153,.14); }
-.kpi-rot { color: var(--txt-3); font-size: 12px; }
-.kpi-val { font-size: 21px; font-weight: 700; letter-spacing: -.02em; margin-top: 4px; }
+.kpi-ic[data-ic="wallet"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f3b57' stroke-width='2'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3Cpath d='M16 12h4'/%3E%3C/svg%3E"); }
+.kpi-ic[data-ic="cost"]   { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2317606b' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/%3E%3C/svg%3E"); background-color: rgba(31, 127, 140, .14); }
+.kpi-ic[data-ic="up"]     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2386512f' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m3 17 6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E"); background-color: rgba(160, 98, 63, .14); }
+.kpi-ic[data-ic="check"]  { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a6638' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='m4 12 5 5L20 6'/%3E%3C/svg%3E"); background-color: rgba(42, 102, 56, .12); }
+.kpi-rot { color: var(--tinta-3); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+
+/* "Valor de face": sans pesada com gradiente de tinta, como os números grandes
+   da nota. A cor sólida fica de recuo para o navegador sem `background-clip:
+   text`. */
+.kpi-val, .destaque-val, .reb-resumo b, .metrica strong {
+  color: var(--tinta);
+  font-weight: 800;
+  background: linear-gradient(180deg, var(--tinta) 15%, var(--tinta-2) 90%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.kpi-val { font-size: 22px; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 .cartao-destaque {
-  border-radius: var(--r); padding: 24px;
-  background: linear-gradient(140deg, #8b5cf6 0%, #6d3ff0 45%, #4c1fd6 100%);
-  box-shadow: 0 22px 50px -20px rgba(123, 92, 255, .95);
-  position: relative; overflow: hidden;
+  position: relative; isolation: isolate; overflow: hidden;
+  border-radius: var(--r); padding: 24px 56px 24px 28px;
+  /* A parte "turquesa" da nota: água clara no topo, turquesa médio embaixo, e
+     uma roseta grande de guilhoché ao fundo. */
+  background:
+    repeating-radial-gradient(circle at 28% 118%, transparent 0 6px, rgba(31, 59, 87, .16) 6px 6.6px),
+    repeating-conic-gradient(from 0deg at 28% 118%, rgba(31, 59, 87, .10) 0 .6deg, transparent .6deg 6deg),
+    linear-gradient(150deg, var(--agua) 0%, #b9e1e3 45%, var(--turquesa) 100%);
+  border: 1px solid var(--filete-forte);
+  box-shadow: inset 0 0 0 3px #d6eeef, inset 0 0 0 4px var(--filete-medio), var(--sombra);
   display: flex; flex-direction: column;
 }
-/* Círculos concêntricos translúcidos — o detalhe do cartão da referência. */
+/* A faixa holográfica do cartão fica à direita, onde a nota a tem; a regra
+   compartilhada a colocava à esquerda. */
+.cartao-destaque::after { left: auto; right: 22px; top: 10px; bottom: 10px; width: 20px; border-radius: 3px; }
+/* Círculos de guilhoché no canto superior, mascarados para esmaecer. */
 .cartao-destaque::before {
-  content: ""; position: absolute; right: -70px; top: -70px;
-  width: 260px; height: 260px; border-radius: 50%;
-  border: 42px solid rgba(255,255,255,.06);
-  box-shadow: 0 0 0 42px rgba(255,255,255,.045);
+  content: ""; position: absolute; right: -30px; top: -50px; width: 220px; height: 220px; z-index: -1;
+  border-radius: 50%; opacity: .45; pointer-events: none;
+  background: repeating-radial-gradient(circle at 50% 50%, transparent 0 4px, rgba(31, 59, 87, .35) 4px 4.7px);
+  -webkit-mask-image: radial-gradient(circle, #000 0, transparent 70%);
+  mask-image: radial-gradient(circle, #000 0, transparent 70%);
 }
-.destaque-rot { color: rgba(255,255,255,.75); font-size: 12px; position: relative; }
-.destaque-val { font-size: 30px; font-weight: 700; letter-spacing: -.03em; margin: 6px 0 2px; position: relative; }
-.destaque-var { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.92); position: relative; }
+.destaque-rot { color: var(--tinta-2); font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+.destaque-val { font-size: 34px; letter-spacing: -.03em; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+.destaque-var { font-size: 13px; font-weight: 700; color: var(--tinta); }
+/* Rodapé em "número de série": monoespaçada com espaçamento largo. */
 .destaque-rodape {
-  margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between;
-  font-size: 11px; color: rgba(255,255,255,.7); position: relative;
+  margin-top: auto; padding-top: 22px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px;
+  font-family: var(--serie); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta-2);
 }
 
 .grafico-grande { margin-bottom: 18px; }
 .vazio-explicado {
   display: grid; place-items: center; height: 100%; text-align: center;
-  color: var(--txt-2); font-size: 13.5px; line-height: 1.7;
+  color: var(--tinta-2); font-size: 13.5px; line-height: 1.7;
   max-width: 560px; margin: 0 auto;
-  border: 1px dashed var(--borda-forte); border-radius: var(--r);
+  border: 1px dashed var(--filete-forte); border-radius: var(--r);
   padding: 24px;
 }
 .tela-grafico { height: 320px; position: relative; }
@@ -440,41 +591,41 @@ h1, h2, h3, p { margin: 0; }
 .cabeca-acoes { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .alternador {
   display: flex; gap: 2px; padding: 3px;
-  background: var(--superficie-2); border: 1px solid var(--borda); border-radius: 999px;
+  background: var(--campo); border: 1px solid var(--filete-forte); border-radius: 999px;
 }
 .alternador button {
-  font-size: 11.5px; font-weight: 600; color: var(--txt-3);
+  font-size: 11.5px; font-weight: 700; color: var(--tinta-3);
   padding: 4px 12px; border-radius: 999px;
 }
-.alternador button.is-ativo { background: rgba(123, 92, 255, .22); color: var(--txt); }
+.alternador button.is-ativo { background: var(--tinta); color: #eef8f7; }
 
 .seletor-mini {
-  background: var(--superficie-2); border: 1px solid var(--borda);
-  border-radius: 999px; padding: 6px 12px; font-size: 12px; outline: none;
-  color: var(--txt-2);
+  background: var(--campo); border: 1px solid var(--filete-forte);
+  border-radius: 999px; padding: 6px 12px; font-size: 12px;
+  color: var(--tinta-2);
 }
 /* Estado ligado do "Só o índice" -- a mesma cor do alternador %/R$ ativo, pelo
    atributo `aria-pressed` em vez de uma classe: um só lugar decide se o botão
    está aceso, e é o mesmo que a leitora de tela usa. */
 .btn-so-indexador[aria-pressed="true"] {
-  background: rgba(123, 92, 255, .22); color: var(--txt); border-color: rgba(123, 92, 255, .3);
+  background: var(--tinta); color: #eef8f7; border-color: var(--tinta);
 }
 /* Verde quando bateu o indexador, vermelho quando ficou atrás. A cor carrega a
    resposta antes de a pessoa ler o número. */
 .selo-comparacao {
-  font-size: 12px; font-weight: 650; padding: 5px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;
   border: 1px solid transparent;
 }
 .selo-comparacao.acima {
-  color: var(--verde); background: rgba(52, 211, 153, .12);
-  border-color: rgba(52, 211, 153, .3);
+  color: var(--positivo); background: rgba(42, 102, 56, .12);
+  border-color: rgba(42, 102, 56, .4);
 }
 .selo-comparacao.abaixo {
-  color: var(--vermelho); background: rgba(251, 113, 133, .12);
-  border-color: rgba(251, 113, 133, .3);
+  color: var(--negativo); background: rgba(162, 53, 47, .1);
+  border-color: rgba(162, 53, 47, .4);
 }
-.lg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--txt-2); }
-.lg i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.lg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--tinta-2); }
+.lg i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 1px rgba(31, 59, 87, .3); }
 
 .grade-baixo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 
@@ -483,112 +634,122 @@ h1, h2, h3, p { margin: 0; }
    separado nao mexe em nada do que ja estava posicionado. */
 .cartao-proventos { margin-top: 18px; }
 .selo-proventos {
-  font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
-  background: rgba(53, 214, 232, .14); color: #35d6e8; white-space: nowrap;
+  font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px;
+  background: rgba(31, 127, 140, .14); color: var(--turquesa-esc); white-space: nowrap;
 }
 .vazio-proventos {
-  color: var(--txt-3); font-size: 13px; line-height: 1.7; padding: 22px 0 6px;
+  color: var(--tinta-3); font-size: 13px; line-height: 1.7; padding: 22px 0 6px;
 }
 .pilula-tipo {
-  font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
   padding: 2.5px 8px; border-radius: 999px; text-transform: uppercase;
 }
-.pilula-tipo[data-tipo="dividendo"]  { background: rgba(53, 214, 232, .15); color: #35d6e8; }
-.pilula-tipo[data-tipo="jcp"]        { background: rgba(245, 181, 74, .15); color: #f5b54a; }
-.pilula-tipo[data-tipo="rendimento"] { background: rgba(123, 92, 255, .18); color: #a78bfa; }
+.pilula-tipo[data-tipo="dividendo"]  { background: rgba(31, 127, 140, .15); color: var(--turquesa-esc); }
+.pilula-tipo[data-tipo="jcp"]        { background: rgba(160, 98, 63, .15); color: var(--cobre-esc); }
+.pilula-tipo[data-tipo="rendimento"] { background: rgba(31, 59, 87, .12); color: var(--tinta-2); }
 /* Indefinido em cinza, de proposito: nao e uma categoria, e a ausencia de uma.
    Colori-lo como as outras sugeriria uma informacao que nao temos. */
-.pilula-tipo[data-tipo="indefinido"] { background: rgba(255, 255, 255, .07); color: var(--txt-3); }
+.pilula-tipo[data-tipo="indefinido"] { background: rgba(31, 59, 87, .07); color: var(--tinta-3); }
 
 /* ══ Listas ══ */
 .lista { display: grid; gap: 8px; }
 .linha {
   display: flex; align-items: center; gap: 12px;
-  background: var(--superficie-2); border: 1px solid var(--borda);
+  background: rgba(255, 255, 255, .45); border: 1px solid var(--filete-medio);
   border-radius: var(--r-s); padding: 11px 14px;
 }
 .ficha {
-  width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-  font-weight: 700; font-size: 11px; flex: 0 0 auto;
-  background: rgba(123,92,255,.16); color: var(--violeta-2);
+  width: 36px; height: 34px; border-radius: 6px; display: grid; place-items: center;
+  font-family: var(--serie); font-weight: 700; font-size: 10.5px; letter-spacing: .04em; flex: 0 0 auto;
+  background: var(--tinta); color: #eef8f7;
 }
 .linha-txt { min-width: 0; }
 .linha-txt strong { display: block; font-size: 13px; }
-.linha-txt span { font-size: 11.5px; color: var(--txt-3); }
+.linha-txt span { font-size: 11.5px; color: var(--tinta-3); }
 .linha-num { margin-left: auto; text-align: right; }
 .linha-num strong { display: block; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .linha-num span { font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.pos { color: var(--verde); }
-.neg { color: var(--vermelho); }
+.pos { color: var(--positivo); }
+.neg { color: var(--negativo); }
 
 .pilula {
   font-size: 11px; padding: 4px 10px; border-radius: 999px;
-  border: 1px solid var(--borda-forte); color: var(--txt-2);
+  border: 1px solid var(--filete-forte); color: var(--tinta-2);
 }
-.pilula--compra { color: var(--ciano); border-color: rgba(53,214,232,.3); background: rgba(53,214,232,.09); }
-.pilula--venda  { color: var(--magenta); border-color: rgba(255,79,163,.3); background: rgba(255,79,163,.09); }
+.pilula--compra { color: var(--turquesa-esc); border-color: rgba(31, 127, 140, .5); background: rgba(31, 127, 140, .1); }
+.pilula--venda  { color: var(--cobre-esc); border-color: rgba(160, 98, 63, .5); background: rgba(160, 98, 63, .1); }
 
 /* ══ Tabelas ══ */
 .tabela-envolve { overflow-x: auto; }
 .tabela { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* Cabeçalho em caixa alta espaçada, sublinhado com fio duplo de gravura. */
 .tabela th {
-  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
-  color: var(--txt-3); font-weight: 600; padding: 0 12px 11px; white-space: nowrap;
+  text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--tinta-2); font-weight: 800; padding: 0 12px 10px; white-space: nowrap;
+  border-bottom: 3px double var(--filete-forte);
 }
-.tabela td { padding: 12px; border-top: 1px solid var(--borda); white-space: nowrap; }
+.tabela td { padding: 12px; border-top: 1px solid var(--filete); white-space: nowrap; }
+.tabela tbody tr:first-child td { border-top: 0; }
 .tabela .num { text-align: right; font-variant-numeric: tabular-nums; }
-.tabela tbody tr:hover { background: rgba(255,255,255,.03); }
+.tabela tbody tr:hover { background: rgba(255, 255, 255, .45); }
+/* Data e ticker (primeiras colunas) no estilo de número de série. */
+#tabela-posicoes td:first-child, #tabela-operacoes td:nth-child(-n+2),
+#tabela-proventos td:nth-child(-n+2), #tabela-desvios td:first-child {
+  font-family: var(--serie); letter-spacing: .06em; font-size: 12.5px;
+}
 
 /* Rodape do extrato: contagem e "Carregar mais". Existe porque a tabela cortada
    em 100 tinha a mesma cara do livro inteiro. O `display: flex` so e seguro
    por causa da regra do atributo hidden com !important, no topo do arquivo. */
 .tabela-rodape {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 12px 4px; border-top: 1px solid var(--borda);
+  padding: 14px 12px 4px; border-top: 1px solid var(--filete);
 }
-.tabela-contagem { color: var(--txt-3); font-size: 12.5px; }
-.icone-lixeira { color: var(--txt-3); font-size: 15px; }
-.icone-lixeira:hover { color: var(--vermelho); }
+.tabela-contagem { color: var(--tinta-3); font-size: 12.5px; }
+.icone-lixeira { color: var(--tinta-3); font-size: 15px; }
+.icone-lixeira:hover { color: var(--negativo); }
 
 /* ══ Matriz de correlação ══ */
 .matriz { overflow-x: auto; }
 .matriz table { border-collapse: separate; border-spacing: 4px; font-size: 12px; }
-.matriz th { color: var(--txt-3); font-weight: 600; padding: 4px 8px; font-size: 11px; }
+.matriz th { color: var(--tinta-2); font-weight: 700; padding: 4px 8px; font-size: 11px; font-family: var(--serie); letter-spacing: .06em; }
 .matriz td {
-  width: 62px; height: 40px; text-align: center; border-radius: 8px;
-  font-variant-numeric: tabular-nums; font-weight: 600;
+  width: 62px; height: 40px; text-align: center; border-radius: 5px;
+  font-variant-numeric: tabular-nums; font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--filete);
 }
 
 /* ══ Fronteira ══ */
 .grade-carteiras { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 18px; }
 .carteira-cab { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
-.carteira-cab i { width: 10px; height: 10px; border-radius: 50%; }
-.carteira-cab h3 { font-size: 14px; font-weight: 650; }
+.carteira-cab i { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(31, 59, 87, .35); }
+.carteira-cab h3 { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .metricas { display: flex; gap: 18px; margin-bottom: 14px; }
-.metrica span { display: block; font-size: 10.5px; color: var(--txt-3); text-transform: uppercase; letter-spacing: .06em; }
-.metrica strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.metrica span { display: block; font-size: 10.5px; color: var(--tinta-3); text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+.metrica strong { font-size: 18px; font-variant-numeric: tabular-nums; }
 .barra { display: grid; gap: 7px; }
 .barra-item { display: grid; grid-template-columns: 58px 1fr 48px; align-items: center; gap: 9px; font-size: 12px; }
-.barra-trilho { height: 7px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; }
+.barra-item > span:first-child { font-family: var(--serie); letter-spacing: .06em; font-weight: 700; }
+.barra-trilho { height: 7px; border-radius: 99px; background: rgba(31, 59, 87, .12); overflow: hidden; }
 .barra-preenche { height: 100%; border-radius: 99px; }
-.barra-item em { font-style: normal; text-align: right; color: var(--txt-2); font-variant-numeric: tabular-nums; }
+.barra-item em { font-style: normal; text-align: right; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
 
 .aviso {
-  margin-top: 16px; font-size: 11.5px; color: var(--txt-3); line-height: 1.6;
-  border-left: 2px solid rgba(245,181,74,.5); padding-left: 12px;
+  margin-top: 16px; font-size: 11.5px; color: var(--tinta-3); line-height: 1.6;
+  border-left: 2px solid rgba(160, 98, 63, .6); padding-left: 12px;
 }
 
 /* O cartão que explica de onde saiu o retorno esperado desta fronteira
    específica -- não só a limitação genérica do método. */
 .cartao-explicacao {
-  border: 1px solid var(--borda); background: var(--superficie-2);
+  border: 1px solid var(--filete-medio); background: rgba(255, 255, 255, .45);
   border-radius: var(--r); padding: 14px 16px; margin-top: 16px;
 }
 .cartao-explicacao strong {
-  display: block; font-size: 11px; font-weight: 650; color: var(--txt-2);
-  margin-bottom: 8px; text-transform: uppercase; letter-spacing: .03em;
+  display: block; font-size: 11px; font-weight: 800; color: var(--tinta-2);
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: .1em;
 }
-.cartao-explicacao p { font-size: 11.5px; color: var(--txt-3); line-height: 1.6; }
+.cartao-explicacao p { font-size: 11.5px; color: var(--tinta-3); line-height: 1.6; }
 .cartao-explicacao p + p { margin-top: 8px; }
 
 /* ══ Formulário de operação ══ */
@@ -596,7 +757,7 @@ h1, h2, h3, p { margin: 0; }
 .form-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 .form-acoes { display: flex; gap: 10px; justify-content: flex-end; }
 
-.vazio { color: var(--txt-3); font-size: 13px; padding: 26px 0; text-align: center; }
+.vazio { color: var(--tinta-3); font-size: 13px; padding: 26px 0; text-align: center; }
 
 /* ══ Responsivo ══ */
 @media (max-width: 1180px) {
@@ -620,13 +781,13 @@ h1, h2, h3, p { margin: 0; }
   display: inline-block;
   margin-left: 7px;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .04em;
+  font-weight: 700;
+  letter-spacing: .06em;
   text-transform: uppercase;
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(53, 214, 232, .14);
-  color: var(--ciano);
+  background: rgba(31, 127, 140, .14);
+  color: var(--turquesa-esc);
   cursor: help;
   vertical-align: middle;
 }
@@ -637,13 +798,13 @@ h1, h2, h3, p { margin: 0; }
    inequivoca no momento do clique. */
 .seletor-carteira .btn-perigo {
   display: grid; place-items: center;
-  background: rgba(255, 255, 255, .05);
-  color: var(--txt-3);
+  background: rgba(31, 59, 87, .08);
+  color: var(--tinta-3);
   transition: background .16s, color .16s;
 }
 .seletor-carteira .btn-perigo:hover {
-  background: rgba(251, 113, 133, .16);
-  color: var(--vermelho);
+  background: rgba(162, 53, 47, .14);
+  color: var(--negativo);
 }
 .seletor-carteira .btn-perigo svg {
   width: 15px; height: 15px;
@@ -656,21 +817,17 @@ h1, h2, h3, p { margin: 0; }
    Colori-lo como as classificações sugeriria uma informação que ainda não
    temos. */
 .seletor-tipo {
-  background: rgba(255, 255, 255, .07);
-  color: var(--txt-2);
-  border: 1px solid var(--borda);
+  background: var(--campo);
+  color: var(--tinta-2);
+  border: 1px solid var(--filete-forte);
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 11px;
-  outline: none;
   cursor: pointer;
   max-width: 150px;
 }
-.seletor-tipo:hover { border-color: var(--borda-forte); color: var(--txt); }
-.seletor-tipo:focus-visible {
-  border-color: var(--violeta);
-  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
-}
+.seletor-tipo:hover { border-color: var(--tinta); color: var(--tinta); }
+.seletor-tipo:focus-visible { border-color: var(--tinta); }
 .seletor-tipo:disabled { opacity: .5; cursor: default; }
 
 /* ══ Rebalanceamento ══ */
@@ -687,39 +844,42 @@ h1, h2, h3, p { margin: 0; }
    grandes de propósito -- é a resposta da pergunta, não um detalhe. */
 .reb-resumo {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1px; background: var(--borda);
-  border: 1px solid var(--borda); border-radius: var(--r-s);
+  gap: 1px; background: var(--filete-medio);
+  border: 1px solid var(--filete-medio); border-radius: var(--r-s);
   overflow: hidden; margin-bottom: 18px;
 }
-.reb-resumo div { background: var(--superficie-2); padding: 14px 16px; }
-.reb-resumo b { display: block; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.reb-resumo div { background: var(--papel-2); padding: 14px 16px; }
+.reb-resumo b { display: block; font-size: 20px; letter-spacing: -.01em; }
 .reb-resumo span {
-  display: block; font-size: 11px; color: var(--txt-3);
-  text-transform: uppercase; letter-spacing: .07em; margin-top: 4px;
+  display: block; font-size: 10.5px; color: var(--tinta-3); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .1em; margin-top: 4px;
 }
-.reb-resumo .compra b { color: var(--ciano); }
-.reb-resumo .venda b  { color: var(--ouro); }
+/* Compra e venda mantêm a cor própria também nos números: o gradiente de tinta
+   do "valor de face" é trocado por cor sólida. */
+.reb-resumo .compra b { background: none; -webkit-text-fill-color: var(--turquesa-esc); color: var(--turquesa-esc); }
+.reb-resumo .venda b  { background: none; -webkit-text-fill-color: var(--cobre-esc); color: var(--cobre-esc); }
 
 .reb-legenda { margin: 22px 0 8px; }
 .reb-rodape {
-  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--borda);
-  font-size: 12.5px; color: var(--txt-3); line-height: 1.65;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--filete);
+  font-size: 12.5px; color: var(--tinta-3); line-height: 1.65;
 }
 
 /* Compra e venda com cores distintas: numa lista de ordens, confundir as duas
    custa dinheiro. A cor faz a distinção antes de a pessoa ler a palavra. */
 .pilula-ordem {
-  font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
   padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
 }
-.pilula-ordem[data-side="compra"] { background: rgba(53, 214, 232, .15); color: var(--ciano); }
-.pilula-ordem[data-side="venda"]  { background: rgba(245, 181, 74, .15); color: var(--ouro); }
+.pilula-ordem[data-side="compra"] { background: rgba(31, 127, 140, .15); color: var(--turquesa-esc); }
+.pilula-ordem[data-side="venda"]  { background: rgba(160, 98, 63, .15); color: var(--cobre-esc); }
 
 /* Desvio em relação ao alvo: neutro por padrão, destacado quando é grande.
    Deliberadamente SEM verde e vermelho -- essas cores significam lucro e
    prejuízo no resto do app, e estar acima do alvo não é lucro. */
-.desvio { color: var(--txt-2); }
-.desvio--grande { color: var(--txt); font-weight: 600; }
+.desvio { color: var(--tinta-2); }
+.desvio--grande { color: var(--tinta); font-weight: 700; }
 
 /* ══ Projeção ══ */
 .cartao-projecao { margin-top: 18px; }
@@ -728,13 +888,13 @@ h1, h2, h3, p { margin: 0; }
 /* A frase é a entrega da simulação. O gráfico mostra a faixa; ela diz o que a
    faixa significa, em português, com números. */
 .proj-frase {
-  font-size: 15px; line-height: 1.7; color: var(--txt);
+  font-size: 15px; line-height: 1.7; color: var(--tinta);
   padding: 16px 18px; margin-top: 16px;
-  background: var(--superficie-2);
-  border-left: 2px solid var(--violeta);
+  background: rgba(255, 255, 255, .45);
+  border-left: 3px solid var(--tinta);
   border-radius: 0 var(--r-s) var(--r-s) 0;
 }
-.proj-frase b { color: var(--violeta-2); }
+.proj-frase b { color: var(--tinta); font-weight: 800; }
 
 /* ══ ENTRADA POR DEMONSTRAÇÃO ══ */
 
@@ -743,38 +903,38 @@ h1, h2, h3, p { margin: 0; }
    competiria com ele. */
 .login-ou {
   display: flex; align-items: center; gap: .75rem;
-  margin: .25rem 0; color: var(--txt-3);
-  font-size: .78rem; text-transform: uppercase; letter-spacing: .08em;
+  margin: .25rem 0; color: var(--tinta-3);
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .14em;
 }
 .login-ou::before, .login-ou::after {
   content: ""; flex: 1; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--borda-forte), transparent);
+  background: linear-gradient(90deg, transparent, var(--filete-forte), transparent);
 }
 
 .btn--demo { width: 100%; }
 
 .login-nota {
   margin: .1rem 0 0; text-align: center;
-  color: var(--txt-3); font-size: .78rem; line-height: 1.5;
+  color: var(--tinta-3); font-size: .78rem; line-height: 1.5;
 }
 
-/* Aviso permanente na barra lateral. Ouro, não vermelho: não há nada errado
+/* Aviso permanente na barra lateral. Cobre, não vermelho: não há nada errado
    acontecendo -- é um estado, e vermelho num painel financeiro já significa
    prejuízo. */
 .aviso-demo {
-  border: 1px solid rgba(245, 181, 74, .3);
-  background: rgba(245, 181, 74, .08);
+  border: 1px solid rgba(160, 98, 63, .5);
+  background: rgba(160, 98, 63, .10);
   border-radius: var(--r-s);
   padding: .7rem .8rem;
   margin-bottom: 1rem;
 }
 .aviso-demo strong {
-  display: block; color: var(--ouro);
-  font-size: .8rem; letter-spacing: .02em; margin-bottom: .25rem;
+  display: block; color: var(--cobre-esc);
+  font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .25rem;
 }
-.aviso-demo p { margin: 0; color: var(--txt-2); font-size: .75rem; line-height: 1.45; }
-.aviso-demo-prazo { margin-top: .35rem !important; color: var(--txt-3) !important; }
-.aviso-demo-prazo span { color: var(--ouro); font-variant-numeric: tabular-nums; }
+.aviso-demo p { margin: 0; color: var(--tinta-2); font-size: .75rem; line-height: 1.45; }
+.aviso-demo-prazo { margin-top: .35rem !important; color: var(--tinta-3) !important; }
+.aviso-demo-prazo span { color: var(--cobre-esc); font-family: var(--serie); font-variant-numeric: tabular-nums; }
 
 /* ══ ALVO (stop gain / stop loss) ══ */
 
@@ -783,22 +943,22 @@ h1, h2, h3, p { margin: 0; }
    não há nada de bom ou ruim acontecendo, só um estado. */
 .selo-alvo {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
   padding: 4px 9px; border-radius: 999px; cursor: pointer; border: none;
   font-family: inherit; white-space: nowrap;
 }
 .selo-alvo[data-status="sem_alvo"] {
-  background: rgba(255, 255, 255, .05); color: var(--txt-3);
+  background: rgba(31, 59, 87, .07); color: var(--tinta-3);
 }
-.selo-alvo[data-status="sem_alvo"]:hover { background: rgba(255, 255, 255, .09); color: var(--txt-2); }
+.selo-alvo[data-status="sem_alvo"]:hover { background: rgba(31, 59, 87, .14); color: var(--tinta-2); }
 .selo-alvo[data-status="dentro"] {
-  background: rgba(123, 92, 255, .12); color: var(--violeta-2);
+  background: rgba(31, 59, 87, .12); color: var(--tinta-2);
 }
 .selo-alvo[data-status="gain_atingido"] {
-  background: rgba(52, 211, 153, .16); color: var(--verde);
+  background: rgba(42, 102, 56, .16); color: var(--positivo);
 }
 .selo-alvo[data-status="loss_atingido"] {
-  background: rgba(251, 113, 133, .16); color: var(--vermelho);
+  background: rgba(162, 53, 47, .14); color: var(--negativo);
 }
 
 /* ══ Modal ══ */
@@ -806,45 +966,48 @@ h1, h2, h3, p { margin: 0; }
 .modal-fundo {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(4, 3, 10, .6); backdrop-filter: blur(3px);
+  background: rgba(31, 59, 87, .45); backdrop-filter: blur(3px);
   padding: 20px;
 }
 .modal {
+  position: relative; isolation: isolate;
   width: 100%; max-width: 420px;
-  background: var(--bg-2); border: 1px solid var(--borda-forte);
-  border-radius: var(--r); box-shadow: var(--sombra);
+  background: linear-gradient(160deg, #eaf6f4, var(--papel) 60%, var(--agua));
+  border: 1px solid var(--filete-forte);
+  border-radius: var(--r);
+  box-shadow: inset 0 0 0 3px var(--papel), inset 0 0 0 4px var(--filete-medio), 0 24px 50px -16px rgba(31, 59, 87, .6);
   padding: 22px 24px; display: grid; gap: 16px;
+  max-height: calc(100vh - 40px); overflow-y: auto;
 }
 .modal-cabeca { display: flex; align-items: center; justify-content: space-between; }
-.modal-cabeca h2 { font-size: 16px; font-weight: 700; }
+.modal-cabeca h2 { font-size: 14px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .modal-fechar {
-  width: 28px; height: 28px; border-radius: 8px;
-  color: var(--txt-3); font-size: 13px;
+  width: 28px; height: 28px; border-radius: 5px;
+  color: var(--tinta-3); font-size: 13px;
 }
-.modal-fechar:hover { background: rgba(255, 255, 255, .07); color: var(--txt); }
-.modal-aviso { font-size: 12px; color: var(--txt-3); line-height: 1.5; margin-top: -8px; }
+.modal-fechar:hover { background: rgba(31, 59, 87, .1); color: var(--tinta); }
+.modal-aviso { font-size: 12px; color: var(--tinta-3); line-height: 1.5; margin-top: -8px; }
 
 .alvo-secao { border: none; padding: 0; display: grid; gap: 8px; }
 .alvo-secao legend {
-  font-size: 12px; font-weight: 600; color: var(--txt-2);
+  font-size: 12px; font-weight: 700; color: var(--tinta-2);
   padding: 0; margin-bottom: 2px;
 }
 .alvo-linha { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
 .alvo-linha select, .alvo-linha input {
-  background: rgba(10, 9, 20, .65);
-  border: 1px solid var(--borda);
+  background: var(--campo);
+  border: 1px solid var(--filete-forte);
   border-radius: var(--r-s);
   padding: 10px 11px;
-  outline: none;
-  color: var(--txt);
+  color: var(--tinta);
   font-size: 13.5px;
   transition: border-color .16s, box-shadow .16s;
 }
 .alvo-linha select:focus, .alvo-linha input:focus {
-  border-color: var(--violeta);
-  box-shadow: 0 0 0 3px rgba(123, 92, 255, .2);
+  border-color: var(--tinta);
+  box-shadow: 0 0 0 3px rgba(31, 59, 87, .14);
 }
-.alvo-linha input:disabled { opacity: .4; cursor: not-allowed; }
+.alvo-linha input:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ══ BARRAS DE META (tela de Posições) ══
    Barras horizontais empilhadas: o alinhamento vertical é o que torna a
@@ -854,9 +1017,9 @@ h1, h2, h3, p { margin: 0; }
 .cartao--meta { display: grid; gap: 16px; }
 
 .selo-nao-distribuido {
-  font-size: 11.5px; font-weight: 600;
-  color: var(--ouro); background: rgba(245, 181, 74, .1);
-  border: 1px solid rgba(245, 181, 74, .28);
+  font-size: 11.5px; font-weight: 700;
+  color: var(--cobre-esc); background: rgba(160, 98, 63, .12);
+  border: 1px solid rgba(160, 98, 63, .45);
   padding: 5px 11px; border-radius: 999px; white-space: nowrap;
 }
 
@@ -864,42 +1027,42 @@ h1, h2, h3, p { margin: 0; }
    Fica destacada porque é a única pergunta que a pessoa faz sobre o
    conjunto -- as por papel respondem "onde eu ponho o próximo aporte". */
 .meta-total {
-  background: linear-gradient(135deg, rgba(123, 92, 255, .14), rgba(255, 79, 163, .07));
-  border: 1px solid rgba(123, 92, 255, .22);
+  background: linear-gradient(135deg, rgba(143, 208, 214, .45), rgba(207, 233, 234, .5));
+  border: 1px solid var(--filete-forte);
   border-radius: var(--r-s);
   padding: 16px 18px;
   display: grid; gap: 10px;
 }
 .meta-total-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.meta-total-rotulo { font-size: 12px; color: var(--txt-2); font-weight: 600; letter-spacing: .02em; }
-.meta-total-numeros { font-family: inherit; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--txt-2); }
-.meta-total-numeros b { color: var(--txt); font-size: 15px; }
+.meta-total-rotulo { font-size: 11.5px; color: var(--tinta-2); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.meta-total-numeros { font-family: inherit; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--tinta-2); }
+.meta-total-numeros b { color: var(--tinta); font-size: 15px; font-weight: 800; }
 
 .barras { display: grid; gap: 14px; }
 
 .barra { display: grid; gap: 7px; cursor: pointer; }
-.barra:hover .barra-trilho { border-color: var(--borda-forte); }
-.barra:hover .barra-ticker { color: var(--violeta-2); }
+.barra:hover .barra-trilho { border-color: var(--tinta); }
+.barra:hover .barra-ticker { color: var(--turquesa-esc); }
 
 .barra-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.barra-ticker { font-weight: 700; font-size: 13.5px; transition: color .16s; }
+.barra-ticker { font-family: var(--serie); letter-spacing: .08em; font-weight: 700; font-size: 13.5px; transition: color .16s; }
 .barra-numeros {
-  font-size: 12px; color: var(--txt-3);
+  font-size: 12px; color: var(--tinta-3);
   font-variant-numeric: tabular-nums; text-align: right;
 }
-.barra-numeros b { color: var(--txt-2); font-weight: 600; }
+.barra-numeros b { color: var(--tinta-2); font-weight: 700; }
 
 .barra-trilho {
   position: relative; height: 10px; border-radius: 999px;
-  background: rgba(255, 255, 255, .05);
-  border: 1px solid var(--borda);
+  background: rgba(31, 59, 87, .09);
+  border: 1px solid var(--filete-medio);
   overflow: hidden;
   transition: border-color .16s;
 }
 .barra-preenchida {
   position: absolute; inset: 0 auto 0 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--violeta), var(--magenta));
+  background: linear-gradient(90deg, var(--turquesa-2), var(--tinta-2));
   /* A largura anima na primeira pintura: a barra "cresce" até a posição,
      que é o que faz o progresso ser lido como movimento e não como um
      retângulo estático. */
@@ -908,13 +1071,13 @@ h1, h2, h3, p { margin: 0; }
 /* Meta batida muda de cor, não só de tamanho -- 100% e 140% desenhariam a
    mesma barra cheia, e a cor é o que separa "chegou" de "passou". */
 .barra-preenchida[data-atingida="true"] {
-  background: linear-gradient(90deg, var(--verde), #6ee7b7);
+  background: linear-gradient(90deg, var(--sage-esc), #7fae80);
 }
 .barra-pct {
-  font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
-  color: var(--violeta-2); min-width: 44px; text-align: right;
+  font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums;
+  color: var(--tinta-2); min-width: 44px; text-align: right;
 }
-.barra-pct[data-atingida="true"] { color: var(--verde); }
+.barra-pct[data-atingida="true"] { color: var(--positivo); }
 
 /* ══ Barra de faixa (distância até o alvo) ══
    Aqui o trilho não é "0 até a meta", é "stop loss até stop gain" -- e o
@@ -923,28 +1086,32 @@ h1, h2, h3, p { margin: 0; }
 .barras--faixa .barra-trilho {
   height: 8px;
   background: linear-gradient(90deg,
-    rgba(251, 113, 133, .35), rgba(255, 255, 255, .06) 50%, rgba(52, 211, 153, .35));
+    rgba(179, 67, 59, .38), rgba(31, 59, 87, .08) 50%, rgba(78, 125, 79, .42));
   overflow: visible;
 }
 .barra-marcador {
   position: absolute; top: 50%; width: 3px; height: 18px;
-  border-radius: 2px; background: var(--txt);
+  border-radius: 2px; background: var(--tinta);
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 10px rgba(233, 231, 243, .5);
+  box-shadow: 0 0 0 1px var(--papel);
   transition: left .7s cubic-bezier(.22, 1, .36, 1);
 }
 .barra-extremos {
   display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--tinta-3); font-variant-numeric: tabular-nums;
 }
-.barra-extremos .perto-loss { color: var(--vermelho); }
-.barra-extremos .perto-gain { color: var(--verde); }
+.barra-extremos .perto-loss { color: var(--negativo); }
+.barra-extremos .perto-gain { color: var(--positivo); }
 
-.alvo-secao--meta { border-top: 1px solid var(--borda); padding-top: 14px; }
+.alvo-secao--meta { border-top: 1px solid var(--filete); padding-top: 14px; }
 .alvo-linha--meta { grid-template-columns: 1fr; }
 
+/* Movimento só onde ele informa. Quem pede menos movimento no sistema não vê o
+   brilho da faixa holográfica nem as barras crescendo. */
 @media (prefers-reduced-motion: reduce) {
   .barra-preenchida, .barra-marcador { transition: none; }
+  .login-card::after, .kpi::after, .cartao-destaque::after { transition: none; }
+  .btn, .nav-item, .campo input, .campo select { transition: none; }
 }
 
 /* ══ RÉGUA DE ALVO (arrastável) ══ */
@@ -954,8 +1121,8 @@ h1, h2, h3, p { margin: 0; }
 .regua-trilho {
   position: relative; height: 46px;
   border-radius: var(--r-s);
-  background: rgba(10, 9, 20, .6);
-  border: 1px solid var(--borda);
+  background: var(--campo);
+  border: 1px solid var(--filete-forte);
   overflow: hidden;
   touch-action: none;   /* o arrasto é nosso, não do scroll da página */
 }
@@ -965,24 +1132,24 @@ h1, h2, h3, p { margin: 0; }
    no eixo vertical e não daria para encostar um no outro. */
 .regua-densidade { position: absolute; inset: 0; display: flex; align-items: flex-end; }
 .regua-densidade i {
-  flex: 1; background: var(--violeta-2); opacity: .16;
+  flex: 1; background: var(--turquesa-2); opacity: .5;
   border-radius: 1px 1px 0 0;
 }
 
 /* A área entre os dois alvos: onde o preço "pode ficar" sem acionar nada. */
 .regua-faixa {
   position: absolute; top: 0; bottom: 0;
-  background: linear-gradient(90deg, rgba(251,113,133,.14), rgba(52,211,153,.14));
-  border-left: 1px solid rgba(251,113,133,.5);
-  border-right: 1px solid rgba(52,211,153,.5);
+  background: linear-gradient(90deg, rgba(179, 67, 59, .14), rgba(78, 125, 79, .16));
+  border-left: 1px solid rgba(179, 67, 59, .6);
+  border-right: 1px solid rgba(78, 125, 79, .7);
   pointer-events: none;
 }
 
-.regua-hoje { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--txt); pointer-events: none; }
+.regua-hoje { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tinta); pointer-events: none; }
 .regua-hoje span {
   position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
-  width: 7px; height: 7px; border-radius: 50%; background: var(--txt);
-  box-shadow: 0 0 8px rgba(233,231,243,.7);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--tinta);
+  box-shadow: 0 0 0 2px var(--campo);
 }
 
 .regua-punho {
@@ -996,18 +1163,19 @@ h1, h2, h3, p { margin: 0; }
   content: ""; width: 5px; height: 30px; border-radius: 3px;
   transition: transform .12s, box-shadow .12s;
 }
-.regua-punho--gain::before { background: var(--verde); box-shadow: 0 0 10px rgba(52,211,153,.5); }
-.regua-punho--loss::before { background: var(--vermelho); box-shadow: 0 0 10px rgba(251,113,133,.5); }
+.regua-punho--gain::before { background: var(--sage-esc); box-shadow: 0 0 0 1px var(--campo); }
+.regua-punho--loss::before { background: var(--tijolo); box-shadow: 0 0 0 1px var(--campo); }
 .regua-punho:hover::before, .regua-punho:focus-visible::before { transform: scaleY(1.18); }
-.regua-punho:focus-visible { outline: none; }
-.regua-punho:focus-visible::before { box-shadow: 0 0 0 3px rgba(123,92,255,.45); }
+/* O trilho tem `overflow: hidden`, que cortaria o contorno de fora: o contorno
+   vai para DENTRO do botão (offset negativo). */
+.regua-punho:focus-visible { outline-offset: -2px; border-radius: 4px; }
 
 .regua-escala {
   display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--tinta-3); font-variant-numeric: tabular-nums;
 }
-.regua-hoje-rotulo { color: var(--txt-2); font-weight: 600; }
-.regua-ajuda { font-size: 11.5px; color: var(--txt-3); text-align: center; }
+.regua-hoje-rotulo { color: var(--tinta-2); font-weight: 700; }
+.regua-ajuda { font-size: 11.5px; color: var(--tinta-3); text-align: center; }
 
 /* ══ Cenários ("se subir X, você...") ══
    Frase inteira em vez de números soltos: "R$ 1.935,00 (+R$ 252,45)" exige
@@ -1016,20 +1184,20 @@ h1, h2, h3, p { margin: 0; }
 .cenario {
   font-size: 12.5px; line-height: 1.5;
   padding: 8px 11px; border-radius: var(--r-s);
-  border: 1px solid var(--borda);
+  border: 1px solid var(--filete);
 }
 .cenario b { font-variant-numeric: tabular-nums; }
-.cenario--gain { background: rgba(52,211,153,.07); border-color: rgba(52,211,153,.22); color: var(--txt-2); }
-.cenario--gain b { color: var(--verde); }
-.cenario--loss { background: rgba(251,113,133,.07); border-color: rgba(251,113,133,.22); color: var(--txt-2); }
-.cenario--loss b { color: var(--vermelho); }
+.cenario--gain { background: rgba(42, 102, 56, .08); border-color: rgba(42, 102, 56, .35); color: var(--tinta-2); }
+.cenario--gain b { color: var(--positivo); }
+.cenario--loss { background: rgba(162, 53, 47, .07); border-color: rgba(162, 53, 47, .35); color: var(--tinta-2); }
+.cenario--loss b { color: var(--negativo); }
 
 /* O termo de mercado como legenda: quem conhece se localiza, quem não
    conhece não precisa dele para entender a pergunta. */
 .alvo-secao legend i {
-  font-style: normal; font-size: 10.5px; font-weight: 500;
-  color: var(--txt-3); letter-spacing: .04em;
-  background: rgba(255,255,255,.05); border-radius: 5px;
+  font-style: normal; font-size: 10.5px; font-weight: 600;
+  color: var(--tinta-3); letter-spacing: .04em;
+  background: rgba(31, 59, 87, .07); border-radius: 4px;
   padding: 2px 6px; margin-left: 6px;
 }
 
@@ -1038,29 +1206,30 @@ h1, h2, h3, p { margin: 0; }
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 12px 16px; margin-bottom: 16px;
   border-radius: var(--r-s);
-  background: linear-gradient(90deg, rgba(52,211,153,.12), rgba(52,211,153,.04));
-  border: 1px solid rgba(52,211,153,.3);
+  background: linear-gradient(90deg, rgba(42, 102, 56, .14), rgba(42, 102, 56, .04));
+  border: 1px solid rgba(42, 102, 56, .45);
 }
 .faixa-alvos[data-tem-loss="true"] {
-  background: linear-gradient(90deg, rgba(251,113,133,.12), rgba(251,113,133,.04));
-  border-color: rgba(251,113,133,.3);
+  background: linear-gradient(90deg, rgba(162, 53, 47, .13), rgba(162, 53, 47, .04));
+  border-color: rgba(162, 53, 47, .45);
 }
 .faixa-alvos strong { font-size: 13.5px; }
-.faixa-alvos p { font-size: 12.5px; color: var(--txt-2); margin: 0; }
+.faixa-alvos p { font-size: 12.5px; color: var(--tinta-2); margin: 0; }
 .faixa-alvos .btn { margin-left: auto; }
 
 
 /* ══ Card explicativo (mesmo papel do card da fronteira, na lateral) ══ */
 .cartao--explica { display: flex; gap: 14px; align-items: flex-start; }
 .explica-ic {
-  flex: none; width: 34px; height: 34px; border-radius: 10px;
-  background: rgba(123, 92, 255, .16);
+  flex: none; width: 34px; height: 34px; border-radius: 8px;
+  background: rgba(31, 59, 87, .10);
+  box-shadow: 0 0 0 1px var(--filete-medio);
   display: grid; place-items: center;
 }
-.explica-ic::before { content: "?"; color: var(--violeta-2); font-weight: 700; font-size: 16px; }
+.explica-ic::before { content: "?"; color: var(--tinta); font-weight: 800; font-size: 16px; }
 .cartao--explica strong { display: block; font-size: 13.5px; margin-bottom: 4px; }
-.cartao--explica p { font-size: 12.5px; color: var(--txt-2); line-height: 1.6; margin: 0; }
-.cartao--explica em { color: var(--txt); font-style: normal; font-weight: 600; }
+.cartao--explica p { font-size: 12.5px; color: var(--tinta-2); line-height: 1.6; margin: 0; }
+.cartao--explica em { color: var(--tinta); font-style: normal; font-weight: 700; }
 
 /* ══ ÁREA DE TRADE ══ */
 
@@ -1068,38 +1237,39 @@ h1, h2, h3, p { margin: 0; }
 .trades { display: grid; gap: 10px; }
 
 .trade {
-  border: 1px solid var(--borda);
+  border: 1px solid var(--filete-medio);
   border-radius: var(--r-s);
-  background: rgba(255, 255, 255, .02);
+  background: rgba(255, 255, 255, .4);
   overflow: hidden;
 }
-.trade[data-motivo="gain_atingido"] { border-color: rgba(52, 211, 153, .32); }
-.trade[data-motivo="loss_atingido"] { border-color: rgba(251, 113, 133, .32); }
+.trade[data-motivo="gain_atingido"] { border-color: rgba(42, 102, 56, .55); }
+.trade[data-motivo="loss_atingido"] { border-color: rgba(162, 53, 47, .55); }
 
 .trade-topo {
   display: grid; grid-template-columns: auto 1fr auto; align-items: center;
   gap: 12px; padding: 12px 14px; cursor: pointer; width: 100%;
   text-align: left; font: inherit; color: inherit;
 }
-.trade-topo:hover { background: rgba(255, 255, 255, .03); }
-.trade-ticker { font-weight: 700; font-size: 14px; }
+.trade-topo:hover { background: rgba(255, 255, 255, .5); }
+.trade-topo:focus-visible { outline-offset: -2px; }
+.trade-ticker { font-family: var(--serie); letter-spacing: .08em; font-weight: 700; font-size: 14px; }
 .trade-motivo {
-  font-size: 10.5px; font-weight: 600; letter-spacing: .03em;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
   padding: 3px 8px; border-radius: 999px; white-space: nowrap;
 }
-.trade-motivo[data-motivo="gain_atingido"] { background: rgba(52,211,153,.16); color: var(--verde); }
-.trade-motivo[data-motivo="loss_atingido"] { background: rgba(251,113,133,.16); color: var(--vermelho); }
-.trade-motivo[data-motivo="perto"]         { background: rgba(245,181,74,.14);  color: var(--ouro); }
-.trade-motivo[data-motivo="fixado"]        { background: rgba(123,92,255,.16);  color: var(--violeta-2); }
+.trade-motivo[data-motivo="gain_atingido"] { background: rgba(42, 102, 56, .16); color: var(--positivo); }
+.trade-motivo[data-motivo="loss_atingido"] { background: rgba(162, 53, 47, .14); color: var(--negativo); }
+.trade-motivo[data-motivo="perto"]         { background: rgba(160, 98, 63, .16); color: var(--cobre-esc); }
+.trade-motivo[data-motivo="fixado"]        { background: rgba(31, 59, 87, .12); color: var(--tinta-2); }
 
-.trade-resumo { font-size: 12.5px; color: var(--txt-2); font-variant-numeric: tabular-nums; }
-.trade-resumo b { color: var(--txt); }
-.trade-seta { color: var(--txt-3); transition: transform .18s; }
+.trade-resumo { font-size: 12.5px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.trade-resumo b { color: var(--tinta); }
+.trade-seta { color: var(--tinta-3); transition: transform .18s; }
 .trade[data-aberto="true"] .trade-seta { transform: rotate(90deg); }
 
 .trade-corpo {
   padding: 0 14px 14px; display: grid; gap: 12px;
-  border-top: 1px solid var(--borda);
+  border-top: 1px solid var(--filete);
 }
 
 /* Os dois sentidos da conta, lado a lado: "quanto quero tirar" e "quanto
@@ -1108,22 +1278,22 @@ h1, h2, h3, p { margin: 0; }
 @media (max-width: 720px) { .trade-sentidos { grid-template-columns: 1fr; } }
 
 .trade-sentido { display: grid; gap: 6px; }
-.trade-sentido label { font-size: 11.5px; color: var(--txt-2); font-weight: 600; }
+.trade-sentido label { font-size: 11.5px; color: var(--tinta-2); font-weight: 700; }
 .trade-sentido input {
-  background: rgba(10, 9, 20, .65); border: 1px solid var(--borda);
-  border-radius: var(--r-s); padding: 9px 11px; outline: none;
-  color: var(--txt); font-size: 13px; width: 100%;
+  background: var(--campo); border: 1px solid var(--filete-forte);
+  border-radius: var(--r-s); padding: 9px 11px;
+  color: var(--tinta); font-size: 13px; width: 100%;
 }
-.trade-sentido input:focus { border-color: var(--violeta); box-shadow: 0 0 0 3px rgba(123,92,255,.2); }
-.trade-saida { font-size: 12px; line-height: 1.55; color: var(--txt-2); min-height: 34px; }
-.trade-saida b { color: var(--txt); font-variant-numeric: tabular-nums; }
-.trade-saida[data-viavel="false"] { color: var(--ouro); }
+.trade-sentido input:focus { border-color: var(--tinta); box-shadow: 0 0 0 3px rgba(31, 59, 87, .14); }
+.trade-saida { font-size: 12px; line-height: 1.55; color: var(--tinta-2); min-height: 34px; }
+.trade-saida b { color: var(--tinta); font-variant-numeric: tabular-nums; }
+.trade-saida[data-viavel="false"] { color: var(--cobre-esc); }
 
 .trade-acoes { display: flex; gap: 8px; align-items: center; }
 .trade-acoes .btn { padding: 7px 12px; font-size: 12px; }
 
 .trade-bruto {
-  font-size: 11.5px; color: var(--txt-3); line-height: 1.55;
-  border-top: 1px solid var(--borda); padding-top: 12px;
+  font-size: 11.5px; color: var(--tinta-3); line-height: 1.55;
+  border-top: 1px solid var(--filete); padding-top: 12px;
 }
-.trade-bruto strong { color: var(--txt-2); }
+.trade-bruto strong { color: var(--tinta-2); }

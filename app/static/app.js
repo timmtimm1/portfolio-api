@@ -1095,8 +1095,36 @@ function renderOperacoesResumo(pagina) {
 
 /* ═══ Gráficos ═══ */
 
-const GRADE = "rgba(255,255,255,.055)";
-const EIXO = "#6f6a8c";
+// Paleta dos gráficos, sobre o papel azul-água dos cartões (#e4f2f0). Um lugar
+// só: trocar o tema é mexer aqui, não caçar literais pelo arquivo. As séries têm
+// matizes distintos E claridades separadas (marinho bem escuro, os demais médios)
+// para continuarem distinguíveis em daltonismo; todas passam de 3:1 contra o
+// papel. As cores de série precisam ser #rrggbb: `gradiente()` anexa o alfa.
+const CORES = {
+  marinho: "#1f3b57",
+  turquesa: "#1f7f8c",
+  cobre: "#a0623f",
+  salvia: "#4e7d4f",
+  tijolo: "#b3433b",
+  papel: "#e4f2f0",
+  grade: "rgba(31,59,87,.12)",
+  eixo: "#3f6077",
+  // Tooltip em tinta escura, texto claro: destaca-se do papel claro.
+  tooltipFundo: "#1f3b57f2",
+  tooltipBorda: "rgba(143,211,216,.55)",
+  tooltipTitulo: "#eef8f7",
+  tooltipCorpo: "#cfe9ea",
+  // Matriz de correlação: tons "r,g,b" (viram rgba com a intensidade) e texto.
+  correlacaoPositiva: "78,125,79",
+  correlacaoNegativa: "179,67,59",
+  correlacaoTexto: "#2d4f6e",
+  correlacaoTextoForte: "#1f3b57",
+  // Faixas de confiança da projeção (marinho com alfa crescente).
+  faixaFraca: "rgba(31,59,87,.14)",
+  faixaMedia: "rgba(31,59,87,.34)",
+};
+const GRADE = CORES.grade;
+const EIXO = CORES.eixo;
 
 function base(escalaY = {}) {
   return {
@@ -1106,8 +1134,8 @@ function base(escalaY = {}) {
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
-        padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+        backgroundColor: CORES.tooltipFundo, borderColor: CORES.tooltipBorda, borderWidth: 1,
+        padding: 11, cornerRadius: 10, titleColor: CORES.tooltipTitulo, bodyColor: CORES.tooltipCorpo,
       },
     },
     scales: {
@@ -1190,10 +1218,10 @@ function desenharEvolucao(evolucao) {
       conjuntos.push({
         label: "Carteira",
         data: evolucao.rentabilidade.map((p) => Number(p.carteira) * 100),
-        borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+        borderColor: CORES.marinho, backgroundColor: gradiente(ctx, CORES.marinho),
         borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
       });
-      rotulos.push(["#ff4fa3", "Carteira"]);
+      rotulos.push([CORES.marinho, "Carteira"]);
     }
 
     if (nomeBench) {
@@ -1204,27 +1232,27 @@ function desenharEvolucao(evolucao) {
         ),
         // Isolada, a linha do indexador ganha o preenchimento que "Carteira"
         // teria -- sozinha, uma linha fina sem nada embaixo parece inacabada.
-        borderColor: "#f5b54a", backgroundColor: isolar ? gradiente(ctx, "#f5b54a") : undefined,
+        borderColor: CORES.cobre, backgroundColor: isolar ? gradiente(ctx, CORES.cobre) : undefined,
         borderWidth: 2, fill: isolar, tension: .35,
         pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
       });
-      rotulos.push(["#f5b54a", nomeBench]);
+      rotulos.push([CORES.cobre, nomeBench]);
     }
   } else {
     if (!isolar) {
       conjuntos.push(
         {
           label: "Valor de mercado", data: pontos.map((p) => Number(p.valor_mercado)),
-          borderColor: "#ff4fa3", backgroundColor: gradiente(ctx, "#ff4fa3"),
+          borderColor: CORES.marinho, backgroundColor: gradiente(ctx, CORES.marinho),
           borderWidth: 2.4, fill: true, tension: .35, pointRadius: 0, pointHoverRadius: 5,
         },
         {
           label: "Custo", data: pontos.map((p) => Number(p.custo_total)),
-          borderColor: "#35d6e8", borderWidth: 1.8, borderDash: [5, 5],
+          borderColor: CORES.turquesa, borderWidth: 1.8, borderDash: [5, 5],
           fill: false, tension: .35, pointRadius: 0, pointHoverRadius: 5,
         },
       );
-      rotulos.push(["#ff4fa3", "Valor de mercado"], ["#35d6e8", "Custo"]);
+      rotulos.push([CORES.marinho, "Valor de mercado"], [CORES.turquesa, "Custo"]);
     }
 
     if (evolucao.benchmark) {
@@ -1235,11 +1263,11 @@ function desenharEvolucao(evolucao) {
       conjuntos.push({
         label: nomeBench,
         data: pontos.map((p) => porData.get(p.date) ?? null),
-        borderColor: "#f5b54a", backgroundColor: isolar ? gradiente(ctx, "#f5b54a") : undefined,
+        borderColor: CORES.cobre, backgroundColor: isolar ? gradiente(ctx, CORES.cobre) : undefined,
         borderWidth: 2, fill: isolar, tension: .35,
         pointRadius: 0, pointHoverRadius: 5, spanGaps: true,
       });
-      rotulos.push(["#f5b54a", nomeBench]);
+      rotulos.push([CORES.cobre, nomeBench]);
     }
   }
 
@@ -1255,8 +1283,8 @@ function desenharEvolucao(evolucao) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
-          padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+          backgroundColor: CORES.tooltipFundo, borderColor: CORES.tooltipBorda, borderWidth: 1,
+          padding: 11, cornerRadius: 10, titleColor: CORES.tooltipTitulo, bodyColor: CORES.tooltipCorpo,
           callbacks: {
             label: (c) =>
               `${c.dataset.label}: ${
@@ -1995,11 +2023,11 @@ function desenharMatriz(correlacao) {
     tr.append(el("th", null, correlacao.tickers[i]));
     linha.forEach((v) => {
       const td = el("td", null, v.toFixed(2));
-      // Verde = move junto, magenta = move ao contrário. A intensidade é o
+      // Verde = move junto, tijolo = move ao contrário. A intensidade é o
       // módulo: correlação -0,8 diversifica tanto quanto +0,8 concentra.
-      const cor = v >= 0 ? "52,211,153" : "255,79,163";
+      const cor = v >= 0 ? CORES.correlacaoPositiva : CORES.correlacaoNegativa;
       td.style.background = `rgba(${cor},${Math.min(Math.abs(v), 1) * 0.32 + 0.04})`;
-      td.style.color = Math.abs(v) > 0.55 ? "#fff" : "#a9a4c2";
+      td.style.color = Math.abs(v) > 0.55 ? CORES.correlacaoTextoForte : CORES.correlacaoTexto;
       tr.append(td);
     });
     tabela.append(tr);
@@ -2073,7 +2101,7 @@ function ponto(carteira, cor, rotulo) {
   return {
     label: rotulo,
     data: [{ x: carteira.volatilidade * 100, y: carteira.retorno_esperado * 100 }],
-    backgroundColor: cor, borderColor: "#0c0b16", borderWidth: 2,
+    backgroundColor: cor, borderColor: CORES.papel, borderWidth: 2,
     pointRadius: 8, pointHoverRadius: 10, showLine: false,
   };
 }
@@ -2100,13 +2128,13 @@ function desenharFronteira(r) {
     {
       label: "Fronteira eficiente",
       data: r.fronteira.map((c) => ({ x: c.volatilidade * 100, y: c.retorno_esperado * 100 })),
-      borderColor: "#7b5cff", backgroundColor: "rgba(123,92,255,.12)",
+      borderColor: CORES.marinho, backgroundColor: "rgba(31,59,87,.12)",
       borderWidth: 2.6, fill: false, tension: .3, pointRadius: 0, showLine: true,
     },
   ];
-  if (r.minima_variancia) conjuntos.push(ponto(r.minima_variancia, "#35d6e8", "Mínima variância"));
-  if (r.maximo_sharpe) conjuntos.push(ponto(r.maximo_sharpe, "#ff4fa3", "Máximo Sharpe"));
-  if (r.carteira_atual) conjuntos.push(ponto(r.carteira_atual, "#f5b54a", "Sua carteira"));
+  if (r.minima_variancia) conjuntos.push(ponto(r.minima_variancia, CORES.turquesa, "Mínima variância"));
+  if (r.maximo_sharpe) conjuntos.push(ponto(r.maximo_sharpe, CORES.salvia, "Máximo Sharpe"));
+  if (r.carteira_atual) conjuntos.push(ponto(r.carteira_atual, CORES.cobre, "Sua carteira"));
 
   graficos.fronteira = new Chart(canvas, {
     type: "scatter",
@@ -2117,8 +2145,8 @@ function desenharFronteira(r) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
-          padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+          backgroundColor: CORES.tooltipFundo, borderColor: CORES.tooltipBorda, borderWidth: 1,
+          padding: 11, cornerRadius: 10, titleColor: CORES.tooltipTitulo, bodyColor: CORES.tooltipCorpo,
           callbacks: {
             label: (c) => `${c.dataset.label}: risco ${c.parsed.x.toFixed(1)}% · retorno ${c.parsed.y.toFixed(1)}%`,
           },
@@ -2145,9 +2173,9 @@ function renderCarteiras(r) {
   limpar(alvo);
 
   const cartoes = [
-    ["Mínima variância", "#35d6e8", r.minima_variancia, "Menor risco possível. Não usa retorno esperado — só covariância, que é bem mais estável."],
-    ["Máximo Sharpe", "#ff4fa3", r.maximo_sharpe, "Melhor retorno por unidade de risco, acima da taxa livre de risco."],
-    ["Sua carteira hoje", "#f5b54a", r.carteira_atual, "Pesos atuais pelo custo, avaliados com os mesmos parâmetros."],
+    ["Mínima variância", CORES.turquesa, r.minima_variancia, "Menor risco possível. Não usa retorno esperado — só covariância, que é bem mais estável."],
+    ["Máximo Sharpe", CORES.salvia, r.maximo_sharpe, "Melhor retorno por unidade de risco, acima da taxa livre de risco."],
+    ["Sua carteira hoje", CORES.cobre, r.carteira_atual, "Pesos atuais pelo custo, avaliados com os mesmos parâmetros."],
   ];
 
   for (const [nome, cor, carteira, explicacao] of cartoes) {
@@ -2449,11 +2477,11 @@ function renderProjecao(r, volatilidade) {
       // A ordem importa: cada faixa se preenche até a ANTERIOR (`fill: "-1"`),
       // então as bandas saem empilhadas de baixo para cima.
       datasets: [
-        faixa("p5", "rgba(123,92,255,.18)", false),
-        faixa("p25", "rgba(123,92,255,.18)", "-1"),
-        faixa("p50", "#7b5cff", "-1"),
-        faixa("p75", "rgba(123,92,255,.45)", "-1"),
-        faixa("p95", "rgba(123,92,255,.18)", "-1"),
+        faixa("p5", CORES.faixaFraca, false),
+        faixa("p25", CORES.faixaFraca, "-1"),
+        faixa("p50", CORES.marinho, "-1"),
+        faixa("p75", CORES.faixaMedia, "-1"),
+        faixa("p95", CORES.faixaFraca, "-1"),
       ],
     },
     options: {
@@ -2461,8 +2489,8 @@ function renderProjecao(r, volatilidade) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: "#16142699", borderColor: "rgba(255,255,255,.14)", borderWidth: 1,
-          padding: 11, cornerRadius: 10, titleColor: "#e9e7f3", bodyColor: "#a9a4c2",
+          backgroundColor: CORES.tooltipFundo, borderColor: CORES.tooltipBorda, borderWidth: 1,
+          padding: 11, cornerRadius: 10, titleColor: CORES.tooltipTitulo, bodyColor: CORES.tooltipCorpo,
           callbacks: {
             title: (itens) => `Ano ${anos(r.pontos[itens[0].dataIndex])}`,
             label: (c) => `${c.dataset.label}: ${brl.format(c.parsed.y)}`,
